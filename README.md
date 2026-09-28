@@ -64,7 +64,7 @@ All dependencies are installed from `conda-forge` by the supplied `environment.y
 ### 1. Clone the repository
 
 ```powershell
-git clone https://github.com/your-username/farmvis.git
+git clone https://github.com/ZaneFrey/WindFarmVis.git
 cd farmvis
 ```
 
