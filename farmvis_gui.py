@@ -47,6 +47,13 @@ PRESET_DIR.mkdir(parents=True, exist_ok=True)
 AMR_COLORS = ["red", "orange", "gold", "green", "deepskyblue", "blue", "magenta"]
 
 
+class OneDecimalDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    """Keep full input precision while presenting compact values in the panel."""
+
+    def textFromValue(self, value: float) -> str:
+        return f"{value:.1f}"
+
+
 class TwoDWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -99,23 +106,44 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         scroll.setWidget(contents)
         self.setCentralWidget(scroll)
 
+        self.panel_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self.panel_splitter.setChildrenCollapsible(False)
+        self.panel_splitter.setHandleWidth(10)
+        self.panel_splitter.setStyleSheet(
+            "QSplitter::handle:vertical {"
+            "background: palette(midlight);"
+            "border-top: 1px solid palette(mid);"
+            "border-bottom: 1px solid palette(mid);"
+            "margin: 3px 0;"
+            "}"
+            "QSplitter::handle:vertical:hover { background: palette(mid); }"
+        )
+        self.layout.addWidget(self.panel_splitter)
+
+        self.control_tabs = QtWidgets.QTabWidget()
+        self.panel_splitter.addWidget(self.control_tabs)
         self._build_domain_controls()
-        self._build_amr_controls()
         self._build_farm_controls()
+        self._build_amr_controls()
         self._build_preset_controls()
         self._build_output_controls()
+        default_tab_height = round(self.control_tabs.sizeHint().height() * 1.3)
+        self.panel_splitter.setSizes([default_tab_height, self.output_panel.sizeHint().height()])
+        self.panel_splitter.handle(1).setToolTip("Drag to resize the control tabs")
         self._refresh_preset_list()
         self.update_visualization()
 
-    def _group(self, title: str) -> tuple[QtWidgets.QGroupBox, QtWidgets.QVBoxLayout]:
-        group = QtWidgets.QGroupBox(title)
-        layout = QtWidgets.QVBoxLayout(group)
-        self.layout.addWidget(group)
-        return group, layout
+    def _control_tab(self, title: str) -> QtWidgets.QVBoxLayout:
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        self.control_tabs.addTab(page, title)
+        return layout
 
     @staticmethod
     def _float(value: float, minimum: float = -1e9, maximum: float = 1e9, step: float = 1.0) -> QtWidgets.QDoubleSpinBox:
-        widget = QtWidgets.QDoubleSpinBox()
+        widget = OneDecimalDoubleSpinBox()
         widget.setRange(minimum, maximum)
         widget.setDecimals(6)
         widget.setSingleStep(step)
@@ -141,7 +169,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         return row
 
     def _build_domain_controls(self) -> None:
-        _, layout = self._group("Domain Controls")
+        layout = self._control_tab("Domain")
         self.lx = self._float(12000.0, minimum=0.001, step=100.0)
         self.ly = self._float(6000.0, minimum=0.001, step=100.0)
         self.lz = self._float(1500.0, minimum=0.001, step=50.0)
@@ -183,7 +211,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.rayleigh_enabled.toggled.connect(lambda enabled: self.rayleigh_depth.setEnabled(enabled))
 
     def _build_amr_controls(self) -> None:
-        _, layout = self._group("AMR Controls")
+        layout = self._control_tab("AMR")
         self.max_level = self._int(0, minimum=0, maximum=10)
         layout.addWidget(self._form_row(("Maximum level", self.max_level)))
         self.amr_toolbox = QtWidgets.QToolBox()
@@ -191,7 +219,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.max_level.valueChanged.connect(self._rebuild_amr_editors)
 
     def _build_farm_controls(self) -> None:
-        _, layout = self._group("Wind Farm Controls")
+        layout = self._control_tab("Wind Farm")
         self.rotor_diameter = self._float(200.0, minimum=0.001, step=5.0)
         self.hub_height = self._float(150.0, minimum=0.001, step=5.0)
         self.cluster_count = self._int(1, minimum=1, maximum=20)
@@ -202,7 +230,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self._rebuild_cluster_editors(1)
 
     def _build_preset_controls(self) -> None:
-        _, layout = self._group("Layout Presets")
+        layout = self._control_tab("Presets")
         self.preset_name = QtWidgets.QLineEdit("default_layout")
         self.preset_combo = QtWidgets.QComboBox()
         save_button = QtWidgets.QPushButton("Save Layout")
@@ -215,6 +243,11 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         layout.addWidget(self._form_row(("Available", self.preset_combo), ("", load_button), ("", refresh_button)))
 
     def _build_output_controls(self) -> None:
+        self.output_panel = QtWidgets.QWidget()
+        output_layout = QtWidgets.QVBoxLayout(self.output_panel)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setSpacing(10)
+
         action_row = QtWidgets.QHBoxLayout()
         update_button = QtWidgets.QPushButton("Update Visualizations")
         export_button = QtWidgets.QPushButton("Export Coordinates")
@@ -226,19 +259,27 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         show_2d_button.clicked.connect(self.two_d_window.show)
         for button in (update_button, export_button, show_3d_button, show_2d_button):
             action_row.addWidget(button)
-        self.layout.addLayout(action_row)
+        output_layout.addLayout(action_row)
 
         self.warning_box = QtWidgets.QPlainTextEdit()
         self.warning_box.setReadOnly(True)
         self.warning_box.setPlaceholderText("Validation warnings appear here.")
         self.warning_box.setMaximumBlockCount(100)
+        self.warning_box.setFixedHeight(80)
         self.summary_box = QtWidgets.QTextBrowser()
         self.summary_box.setOpenExternalLinks(False)
         self.summary_box.setMinimumHeight(360)
-        self.layout.addWidget(QtWidgets.QLabel("Validation Warnings"))
-        self.layout.addWidget(self.warning_box)
-        self.layout.addWidget(QtWidgets.QLabel("Domain and Grid Summary"))
-        self.layout.addWidget(self.summary_box)
+        output_layout.addWidget(QtWidgets.QLabel("Domain and Grid Summary"))
+        output_layout.addWidget(self.summary_box)
+        output_layout.addWidget(QtWidgets.QLabel("Validation Warnings"))
+        output_layout.addWidget(self.warning_box)
+
+        self.output_scroll = QtWidgets.QScrollArea()
+        self.output_scroll.setWidgetResizable(True)
+        self.output_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.output_scroll.setMinimumHeight(180)
+        self.output_scroll.setWidget(self.output_panel)
+        self.panel_splitter.addWidget(self.output_scroll)
 
     def _cluster_editor(self, index: int, values: dict | None = None) -> dict:
         values = values or {}
@@ -420,6 +461,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         created_plotter = self.plotter is None
         if self.plotter is None:
             self.plotter = BackgroundPlotter(show=False, app=QtWidgets.QApplication.instance(), title="FarmVis 3D Domain")
+            self._configure_camera_toolbar()
 
         cluster_values = tuple(
             tuple(getattr(cluster, field_name) for field_name in ClusterConfig.__dataclass_fields__)
@@ -461,6 +503,27 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             update_turbines=turbines_changed,
             reset_camera=created_plotter,
         )
+
+    def _configure_camera_toolbar(self) -> None:
+        if self.plotter is None:
+            return
+
+        camera_views = (
+            ("Top (-Z)", (0.0, 0.0, 1.0), (0.0, 1.0, 0.0)),
+            ("Bottom (+Z)", (0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+            ("Front / Upstream (+X)", (-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+            ("Back / Downstream (-X)", (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+            ("Left (+Y)", (0.0, -1.0, 0.0), (0.0, 0.0, 1.0)),
+            ("Right (-Y)", (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+            ("Isometric", (-1.0, -1.0, 1.0), (0.0, 0.0, 1.0)),
+        )
+        actions = self.plotter.default_camera_tool_bar.actions()
+        for action, (label, direction, view_up) in zip(actions, camera_views, strict=False):
+            action.setText(label)
+            action.triggered.disconnect()
+            action.triggered.connect(
+                lambda _checked=False, vector=direction, up=view_up: self.plotter.view_vector(vector, up)
+            )
 
     def show_3d(self) -> None:
         if self.plotter is not None:

@@ -22,11 +22,13 @@ The application is intended for planning domain dimensions, numerical resolution
 
 FarmVis opens three native windows:
 
-1. **Control panel** — contains all inputs, validation messages, summaries, preset controls, and export actions.
+1. **Control panel** — organizes inputs into **Domain**, **Wind Farm**, **AMR**, and **Presets** tabs, with validation messages, summaries, and actions available below every tab.
 2. **3D domain view** — an interactive PyVista window for rotating, panning, and zooming around the domain.
 3. **2D views** — a tabbed window containing the `x-y`, `x-z`, and `y-z` projections.
 
 The visualization windows are created when the control panel starts and are updated in place. Closing or minimizing a visualization window does not discard the current inputs. Use **Show 3D Window** or **Show 2D Window** to bring it back.
+
+Drag the horizontal divider below the control tabs to make the tab area taller or shorter. The shared action buttons, domain and grid summary, and compact validation-warning pane remain available below the divider.
 
 ## Repository Layout
 
@@ -111,13 +113,13 @@ The `--prune` option removes packages that are no longer declared by the environ
 ## Basic Workflow
 
 1. Launch `farmvis_gui.py` from the activated `farmvis` environment.
-2. Set the domain dimensions and base-grid resolution under **Domain Controls**.
-3. Configure any nested refinement boxes under **AMR Controls**.
-4. Set the turbine model dimensions and define one or more clusters under **Wind Farm Controls**.
+2. Set the domain dimensions and base-grid resolution in the **Domain** tab.
+3. Set the turbine model dimensions and define one or more clusters in the **Wind Farm** tab.
+4. Configure any nested refinement boxes in the **AMR** tab.
 5. Click **Update Visualizations**.
 6. Inspect validation warnings and numerical summaries in the control panel.
 7. Rotate and inspect the native 3D view, then review the three 2D projections.
-8. Save the configuration as a JSON preset if it will be reused.
+8. Save the configuration as a JSON preset from the **Presets** tab if it will be reused.
 9. Click **Export Coordinates** to generate the turbine-coordinate input file.
 
 Changing a control does not immediately rebuild the visualization. Click **Update Visualizations** after making changes.
@@ -266,6 +268,8 @@ Typical PyVista mouse controls are:
 - Left drag — rotate
 - Middle drag — pan
 - Mouse wheel or right drag — zoom
+
+The 3D camera uses atmospheric coordinates: `+x` is downstream, `+y` is left when facing downstream, and `+z` is upward. The initial elevated view is from upstream and to the right, looking downstream into the domain. The camera toolbar follows the same convention: Front/Upstream looks along `+x`, Back/Downstream along `-x`, Left along `+y`, Right along `-y`, Top along `-z`, and Bottom along `+z`.
 
 Click **Show 3D Window** to restore or bring the native PyVista window to the foreground.
 

@@ -790,7 +790,9 @@ def populate_3d_scene(
             plotter.remove_actor("turbines", reset_camera=False, render=False)
 
     if reset_camera:
-        plotter.view_isometric()
+        # Atmospheric coordinates: +x downstream, +y left, and +z upward.
+        # Place the initial elevated camera upstream and to the right.
+        plotter.view_vector((-1.0, -1.0, 1.0), viewup=(0.0, 0.0, 1.0))
 
 
 def plot_xy(
