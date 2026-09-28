@@ -12,6 +12,7 @@ import traceback
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from PySide6 import QtCore, QtWidgets
 from pyvistaqt import BackgroundPlotter
@@ -84,6 +85,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.cluster_editors: list[dict] = []
         self.amr_editors: list[dict] = []
         self.plotter: BackgroundPlotter | None = None
+        self._rotor_angle_signature: tuple | None = None
+        self._turbine_signature: tuple | None = None
+        self._rotor_angles: list[np.ndarray] | None = None
         self.two_d_window = TwoDWindow()
 
         scroll = QtWidgets.QScrollArea()
@@ -413,10 +417,50 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Update failed", str(error))
 
     def _update_3d(self, domain: DomainConfig, study: FarmStudyConfig, metrics: dict, amr: dict, layouts: dict) -> None:
+        created_plotter = self.plotter is None
         if self.plotter is None:
             self.plotter = BackgroundPlotter(show=False, app=QtWidgets.QApplication.instance(), title="FarmVis 3D Domain")
-        self.plotter.clear()
-        populate_3d_scene(self.plotter, domain, study, layouts, amr_metrics=amr, metrics=metrics)
+
+        cluster_values = tuple(
+            tuple(getattr(cluster, field_name) for field_name in ClusterConfig.__dataclass_fields__)
+            for cluster in study.clusters
+        )
+        layout_coordinates = tuple(
+            (cluster["coordinates"].shape, cluster["coordinates"].tobytes())
+            for cluster in layouts["clusters"]
+        )
+        rotor_angle_signature = (
+            study.rotor_diameter,
+            study.hub_height,
+            cluster_values,
+        )
+        turbine_signature = (
+            rotor_angle_signature,
+            layout_coordinates,
+        )
+        if rotor_angle_signature != self._rotor_angle_signature:
+            rng = np.random.default_rng()
+            self._rotor_angles = [
+                rng.uniform(0.0, 360.0, size=cluster["turbine_count"])
+                for cluster in layouts["clusters"]
+            ]
+            self._rotor_angle_signature = rotor_angle_signature
+
+        turbines_changed = created_plotter or turbine_signature != self._turbine_signature
+        if turbines_changed:
+            self._turbine_signature = turbine_signature
+
+        populate_3d_scene(
+            self.plotter,
+            domain,
+            study,
+            layouts,
+            amr_metrics=amr,
+            metrics=metrics,
+            rotor_angles=self._rotor_angles,
+            update_turbines=turbines_changed,
+            reset_camera=created_plotter,
+        )
 
     def show_3d(self) -> None:
         if self.plotter is not None:

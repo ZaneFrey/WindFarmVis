@@ -127,7 +127,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             if domain_config.inflow_enabled and inflow_length > 0.0
             else None,
             "rayleigh": (
-                0.0,
+                -inflow_length,
                 domain_config.Lx,
                 0.0,
                 domain_config.Ly,
@@ -727,38 +727,70 @@ def populate_3d_scene(
     layouts: dict[str, Any],
     amr_metrics: dict[str, Any] | None = None,
     metrics: dict[str, Any] | None = None,
+    rotor_angles: list[np.ndarray] | None = None,
+    update_turbines: bool = True,
+    reset_camera: bool = True,
 ) -> None:
     if metrics is None:
         metrics = compute_grid_metrics(domain_config)
 
     plotter.set_background("white")
-    plotter.add_mesh(_box_line_polydata(metrics["domain_bounds"]["main"]), color="black", line_width=2)
+    plotter.add_mesh(
+        _box_line_polydata(metrics["domain_bounds"]["main"]),
+        color="black",
+        line_width=2,
+        name="main-domain",
+    )
 
     inflow_bounds = metrics["domain_bounds"]["inflow"]
     if inflow_bounds is not None:
-        plotter.add_mesh(_dashed_box_polydata(inflow_bounds), color="black", line_width=2)
+        plotter.add_mesh(
+            _dashed_box_polydata(inflow_bounds),
+            color="black",
+            line_width=2,
+            name="inflow-region",
+        )
+    else:
+        plotter.remove_actor("inflow-region", reset_camera=False, render=False)
 
     rayleigh_bounds = metrics["domain_bounds"]["rayleigh"]
     if rayleigh_bounds is not None:
-        plotter.add_mesh(_dashed_box_polydata(rayleigh_bounds), color="black", line_width=2)
+        plotter.add_mesh(
+            _rayleigh_surface_polydata(rayleigh_bounds),
+            color="lightgray",
+            opacity=0.15,
+            show_edges=False,
+            name="rayleigh-region",
+        )
+    else:
+        plotter.remove_actor("rayleigh-region", reset_camera=False, render=False)
 
+    for actor_name in tuple(plotter.actors):
+        if actor_name.startswith("amr-level-"):
+            plotter.remove_actor(actor_name, reset_camera=False, render=False)
     if amr_metrics is not None:
         for level in amr_metrics["levels"]:
-            plotter.add_mesh(_box_line_polydata(_bounds_dict_to_tuple(level["bounds"])), color=level["color"], line_width=2)
-
-    rotor_radius = 0.5 * study_config.rotor_diameter
-    for cluster in layouts["clusters"]:
-        for x_coord, y_coord in cluster["coordinates"]:
-            disk = pv.Disc(
-                center=(float(x_coord), float(y_coord), study_config.hub_height),
-                inner=0.0,
-                outer=rotor_radius,
-                normal=(1.0, 0.0, 0.0),
-                c_res=96,
+            plotter.add_mesh(
+                _box_line_polydata(_bounds_dict_to_tuple(level["bounds"])),
+                color=level["color"],
+                line_width=2,
+                name=f"amr-level-{level['level_index']}",
             )
-            plotter.add_mesh(disk, color="royalblue", opacity=0.35, show_edges=False)
 
-    plotter.view_isometric()
+    if update_turbines:
+        turbines = _turbine_line_polydata(
+            layouts,
+            rotor_diameter=study_config.rotor_diameter,
+            hub_height=study_config.hub_height,
+            rotor_angles=rotor_angles,
+        )
+        if turbines.n_cells:
+            plotter.add_mesh(turbines, color="black", line_width=2, name="turbines")
+        else:
+            plotter.remove_actor("turbines", reset_camera=False, render=False)
+
+    if reset_camera:
+        plotter.view_isometric()
 
 
 def plot_xy(
@@ -864,6 +896,75 @@ def _box_line_polydata(bounds: tuple[float, float, float, float, float, float]) 
     return _merge_line_segments([pv.Line(start, end) for start, end in _box_edges(bounds)])
 
 
+def _turbine_line_polydata(
+    layouts: dict[str, Any],
+    rotor_diameter: float,
+    hub_height: float,
+    rotor_angles: list[np.ndarray] | None = None,
+) -> pv.PolyData:
+    rotor_radius = 0.5 * rotor_diameter
+    segments: list[pv.PolyData] = []
+    rng = np.random.default_rng()
+
+    if rotor_angles is not None and len(rotor_angles) != len(layouts["clusters"]):
+        raise ValueError("rotor_angles must contain one angle array per cluster")
+
+    for cluster_index, cluster in enumerate(layouts["clusters"]):
+        cluster_angles = (
+            np.asarray(rotor_angles[cluster_index], dtype=float)
+            if rotor_angles is not None
+            else rng.uniform(0.0, 360.0, size=cluster["turbine_count"])
+        )
+        if len(cluster_angles) != cluster["turbine_count"]:
+            raise ValueError("Each rotor angle array must contain one angle per turbine")
+
+        for (x_coord, y_coord), rotor_angle in zip(cluster["coordinates"], cluster_angles, strict=True):
+            hub = np.array([float(x_coord), float(y_coord), hub_height], dtype=float)
+            ground = np.array([float(x_coord), float(y_coord), 0.0], dtype=float)
+            segments.append(pv.Line(ground, hub))
+
+            for blade_offset in (0.0, 120.0, 240.0):
+                angle_deg = rotor_angle + blade_offset
+                angle = np.deg2rad(angle_deg)
+                blade_tip = hub + np.array(
+                    [0.0, rotor_radius * np.cos(angle), rotor_radius * np.sin(angle)],
+                    dtype=float,
+                )
+                segments.append(pv.Line(hub, blade_tip))
+
+    return _merge_line_segments(segments) if segments else pv.PolyData()
+
+
+def _rayleigh_surface_polydata(
+    bounds: tuple[float, float, float, float, float, float],
+) -> pv.PolyData:
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    points = np.array(
+        [
+            [xmin, ymin, zmin],
+            [xmax, ymin, zmin],
+            [xmax, ymax, zmin],
+            [xmin, ymax, zmin],
+            [xmin, ymin, zmax],
+            [xmax, ymin, zmax],
+            [xmax, ymax, zmax],
+            [xmin, ymax, zmax],
+        ],
+        dtype=float,
+    )
+    # Four exterior side strips only; omit both horizontal faces.
+    faces = np.array(
+        [
+            4, 0, 1, 5, 4,
+            4, 1, 2, 6, 5,
+            4, 2, 3, 7, 6,
+            4, 3, 0, 4, 7,
+        ],
+        dtype=np.int64,
+    )
+    return pv.PolyData(points, faces)
+
+
 def _dashed_box_polydata(
     bounds: tuple[float, float, float, float, float, float],
     dash_fraction: float = 0.06,
@@ -953,32 +1054,27 @@ def _add_xz_domain(ax: plt.Axes, domain_config: DomainConfig) -> None:
             )
         )
     if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0:
-        ax.add_patch(
-            Rectangle(
-                (0.0, max(0.0, domain_config.Lz - domain_config.rayleigh_depth)),
-                domain_config.Lx,
-                min(domain_config.rayleigh_depth, domain_config.Lz),
-                fill=False,
-                color="black",
-                linewidth=1.2,
-                linestyle="--",
-            )
+        xmin = -domain_config.Lin if domain_config.inflow_enabled else 0.0
+        zmin = max(0.0, domain_config.Lz - domain_config.rayleigh_depth)
+        ax.plot(
+            [domain_config.Lx, domain_config.Lx, np.nan, xmin, xmin],
+            [domain_config.Lz, zmin, np.nan, domain_config.Lz, zmin],
+            color="lightgray",
+            linewidth=2.0,
+            alpha=0.5,
         )
 
 
 def _add_yz_domain(ax: plt.Axes, domain_config: DomainConfig) -> None:
     ax.add_patch(Rectangle((0.0, 0.0), domain_config.Ly, domain_config.Lz, fill=False, color="black", linewidth=1.5))
     if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0:
-        ax.add_patch(
-            Rectangle(
-                (0.0, max(0.0, domain_config.Lz - domain_config.rayleigh_depth)),
-                domain_config.Ly,
-                min(domain_config.rayleigh_depth, domain_config.Lz),
-                fill=False,
-                color="black",
-                linewidth=1.2,
-                linestyle="--",
-            )
+        zmin = max(0.0, domain_config.Lz - domain_config.rayleigh_depth)
+        ax.plot(
+            [domain_config.Ly, domain_config.Ly, np.nan, 0.0, 0.0],
+            [domain_config.Lz, zmin, np.nan, domain_config.Lz, zmin],
+            color="lightgray",
+            linewidth=2.0,
+            alpha=0.5,
         )
 
 

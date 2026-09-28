@@ -174,13 +174,15 @@ The solved streamwise length used in the base-grid calculation is `L_in + L_x`. 
 
 Enable **Enable Rayleigh region** and enter a depth to reserve a damping layer at the top of the domain.
 
-The damping region occupies:
+The damping region occupies the full solved-domain footprint, including the inflow region when enabled:
 
 ```text
+x = [-L_in, L_x]
+y = [0, L_y]
 z = [L_z - depth, L_z]
 ```
 
-It remains inside `L_z`; it does not increase the domain height. The region is drawn as a dashed black box.
+It remains inside `L_z`; it does not increase the domain height. The visualization consists only of faint, semitransparent strips on the four exterior side faces, with no top face, interior lower face, or filled volume. The vertical 2D projections show the corresponding side boundary segments.
 
 ## AMR Controls
 
@@ -254,9 +256,10 @@ The 3D window displays:
 
 - Main-domain edges as solid black lines
 - Inflow-region edges as dashed black lines
-- Rayleigh-region edges as dashed black lines
+- Rayleigh region as a faint open surface shell spanning the main and inflow regions
 - AMR boxes as solid colored outlines
-- Turbine rotors as translucent blue disks normal to the `x` direction
+- Turbine towers and three-bladed rotors as lightweight black line geometry, with blades spaced 120 degrees apart in the `y-z` rotor plane
+- Randomized rotor orientations that remain unchanged across visualization updates until the corresponding turbine configuration changes
 
 Typical PyVista mouse controls are:
 
