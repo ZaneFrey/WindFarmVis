@@ -230,6 +230,7 @@ The displayed total `N_x`, `N_y`, and `N_z` values use the same replacement prin
 - **Rotor D (m)** — rotor diameter shared by all clusters.
 - **Hub height (m)** — rotor-center height shared by all clusters.
 - **# clusters** — number of independently configured wind-farm clusters.
+- **Preset** — applies rotor diameter and hub height for the NREL 5 MW, DTU 10 MW, IEA 10 MW, IEA 15 MW, Vestas v236, or Siemens Gamesa SG 11.0-200 DD turbine. The IEA 15 MW turbine is selected by default.
 
 Changing the number of clusters creates or removes expandable cluster pages. Values in retained cluster pages are preserved.
 

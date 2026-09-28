@@ -45,6 +45,15 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PRESET_DIR.mkdir(parents=True, exist_ok=True)
 
 AMR_COLORS = ["red", "orange", "gold", "green", "deepskyblue", "blue", "magenta"]
+TURBINE_PRESETS = (
+    ("NREL 5 MW", 126.0, 90.0),
+    ("DTU 10 MW", 178.3, 119.0),
+    ("IEA 10 MW", 198.0, 119.0),
+    ("IEA 15 MW", 240.0, 150.0),
+    ("Vestas v236", 236.0, 115.0),
+    ("Siemens Gamesa SG 11.0-200 DD", 200.0, 140.0),
+)
+DEFAULT_TURBINE_PRESET = "IEA 15 MW"
 
 
 class OneDecimalDoubleSpinBox(QtWidgets.QDoubleSpinBox):
@@ -220,14 +229,43 @@ class FarmVisWindow(QtWidgets.QMainWindow):
 
     def _build_farm_controls(self) -> None:
         layout = self._control_tab("Wind Farm")
-        self.rotor_diameter = self._float(200.0, minimum=0.001, step=5.0)
-        self.hub_height = self._float(150.0, minimum=0.001, step=5.0)
+        self.turbine_preset = QtWidgets.QComboBox()
+        for name, rotor_diameter, hub_height in TURBINE_PRESETS:
+            self.turbine_preset.addItem(name, (rotor_diameter, hub_height))
+        self.turbine_preset.setCurrentText(DEFAULT_TURBINE_PRESET)
+        self.turbine_preset.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.turbine_preset.setMinimumContentsLength(14)
+        self.turbine_preset.setMaximumWidth(260)
+
+        default_rotor_diameter, default_hub_height = self.turbine_preset.currentData()
+        self.rotor_diameter = self._float(default_rotor_diameter, minimum=0.001, step=5.0)
+        self.hub_height = self._float(default_hub_height, minimum=0.001, step=5.0)
         self.cluster_count = self._int(1, minimum=1, maximum=20)
-        layout.addWidget(self._form_row(("Rotor D (m)", self.rotor_diameter), ("Hub height (m)", self.hub_height), ("# clusters", self.cluster_count)))
+        layout.addWidget(self._form_row(("Rotor D (m)", self.rotor_diameter), ("Hub height (m)", self.hub_height)))
+        layout.addWidget(self._form_row(("# clusters", self.cluster_count), ("Preset", self.turbine_preset)))
         self.cluster_toolbox = QtWidgets.QToolBox()
         layout.addWidget(self.cluster_toolbox)
+        self.turbine_preset.currentIndexChanged.connect(self._apply_turbine_preset)
         self.cluster_count.valueChanged.connect(self._rebuild_cluster_editors)
         self._rebuild_cluster_editors(1)
+
+    def _apply_turbine_preset(self, index: int) -> None:
+        dimensions = self.turbine_preset.itemData(index)
+        if dimensions is None:
+            return
+        rotor_diameter, hub_height = dimensions
+        self.rotor_diameter.setValue(rotor_diameter)
+        self.hub_height.setValue(hub_height)
+
+    def _sync_turbine_preset(self, rotor_diameter: float, hub_height: float) -> None:
+        matching_index = -1
+        for index in range(self.turbine_preset.count()):
+            preset_rotor, preset_hub = self.turbine_preset.itemData(index)
+            if np.isclose(rotor_diameter, preset_rotor) and np.isclose(hub_height, preset_hub):
+                matching_index = index
+                break
+        with QtCore.QSignalBlocker(self.turbine_preset):
+            self.turbine_preset.setCurrentIndex(matching_index)
 
     def _build_preset_controls(self) -> None:
         layout = self._control_tab("Presets")
@@ -593,6 +631,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.inflow_enabled.setChecked(domain.inflow_enabled); self.lin.setValue(domain.Lin)
         self.rayleigh_enabled.setChecked(domain.rayleigh_enabled); self.rayleigh_depth.setValue(domain.rayleigh_depth)
         self.max_level.setValue(domain.max_level)
+        self.rotor_diameter.setValue(study.rotor_diameter)
+        self.hub_height.setValue(study.hub_height)
+        self._sync_turbine_preset(study.rotor_diameter, study.hub_height)
         self.cluster_count.setValue(len(study.clusters))
         for editor, cluster in zip(self.cluster_editors, study.clusters):
             for key in ClusterConfig.__dataclass_fields__:
