@@ -1,0 +1,18 @@
+name: farmvis
+channels:
+  - conda-forge
+dependencies:
+  - python=3.14
+  - numpy>=2.0
+  - matplotlib>=3.10
+  - pyvista>=0.48
+  - vtk>=9.6
+  - pyvistaqt>=0.13
+  - pyside6>=6.11
+  - jupyterlab>=4.5
+  - notebook>=7.5
+  - ipykernel>=7.2
+  - ipywidgets>=8.1
+  - trame>=3.12
+  - trame-vtk>=2.11
+  - trame-vuetify>=3.2
