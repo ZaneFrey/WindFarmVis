@@ -92,13 +92,6 @@ conda activate farmvis
 python farmvis_gui.py
 ```
 
-If `conda` is not available in the current PowerShell session, launch an Anaconda/Miniforge prompt or initialize Conda for PowerShell first:
-
-```powershell
-conda init powershell
-```
-
-Restart PowerShell after running that command.
 
 ## Updating an Existing Environment
 
