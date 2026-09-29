@@ -282,7 +282,7 @@ The separate 2D window contains three tabs:
 - **x-z** — streamwise side view
 - **y-z** — frontal view with rotor disks
 
-AMR boxes appear as colored rectangular outlines in each corresponding projection. Click **Show 2D Window** to restore this window.
+AMR boxes appear as colored rectangular outlines in each corresponding projection. Click **Show 2D Window** to restore this window. Select the desired projection tab and click **Save 2D Screenshot** in the control panel to save only that domain plot as a PNG image, without the surrounding tabs or window controls.
 
 ## Numerical Summaries
 

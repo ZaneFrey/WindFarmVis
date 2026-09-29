@@ -286,18 +286,25 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         output_layout.setContentsMargins(0, 0, 0, 0)
         output_layout.setSpacing(10)
 
-        action_row = QtWidgets.QHBoxLayout()
+        action_grid = QtWidgets.QGridLayout()
         update_button = QtWidgets.QPushButton("Update Visualizations")
         export_button = QtWidgets.QPushButton("Export Coordinates")
+        save_2d_button = QtWidgets.QPushButton("Save 2D Screenshot")
         show_3d_button = QtWidgets.QPushButton("Show 3D Window")
         show_2d_button = QtWidgets.QPushButton("Show 2D Window")
         update_button.clicked.connect(self.update_visualization)
         export_button.clicked.connect(self.export_coordinates)
+        save_2d_button.clicked.connect(self.save_2d_screenshot)
         show_3d_button.clicked.connect(self.show_3d)
         show_2d_button.clicked.connect(self.two_d_window.show)
-        for button in (update_button, export_button, show_3d_button, show_2d_button):
-            action_row.addWidget(button)
-        output_layout.addLayout(action_row)
+        action_grid.addWidget(update_button, 0, 0)
+        action_grid.addWidget(export_button, 0, 1)
+        action_grid.addWidget(save_2d_button, 0, 2)
+        action_grid.addWidget(show_3d_button, 1, 0)
+        action_grid.addWidget(show_2d_button, 1, 1)
+        for column in range(3):
+            action_grid.setColumnStretch(column, 1)
+        output_layout.addLayout(action_grid)
 
         self.warning_box = QtWidgets.QPlainTextEdit()
         self.warning_box.setReadOnly(True)
@@ -571,6 +578,30 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             window.raise_()
             window.activateWindow()
             self.plotter.render()
+
+    def save_2d_screenshot(self) -> None:
+        output, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save 2D Screenshot",
+            str(OUTPUT_DIR / "farmvis_2d.png"),
+            "PNG image (*.png)",
+        )
+        if not output:
+            return
+
+        output_path = Path(output)
+        if output_path.suffix.lower() != ".png":
+            output_path = output_path.with_suffix(".png")
+
+        self.two_d_window.show()
+        self.two_d_window.raise_()
+        self.two_d_window.activateWindow()
+        QtWidgets.QApplication.processEvents()
+        canvas = self.two_d_window.tabs.currentWidget()
+        if canvas is None or not canvas.grab().save(str(output_path), "PNG"):
+            QtWidgets.QMessageBox.critical(self, "Save failed", f"Could not save the screenshot to:\n{output_path}")
+            return
+        QtWidgets.QMessageBox.information(self, "Screenshot saved", f"2D screenshot saved to:\n{output_path}")
 
     def export_coordinates(self) -> None:
         try:
