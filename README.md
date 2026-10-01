@@ -28,6 +28,10 @@ FarmVis opens three native windows:
 
 The visualization windows are created when the control panel starts and are updated in place. Closing or minimizing a visualization window does not discard the current inputs. Use **Show 3D Window** or **Show 2D Window** to bring it back.
 
+Use **Plot Vertical Grid** to open an interactive Matplotlib view of cell size `d_z` versus elevation `z`. Each vertical grid level is drawn behind the profile as a light-gray horizontal line. This plot is opened only on request and is not shown when FarmVis starts.
+
+Use **Save grid levels** to write every current vertical edge level, including `0` and `L_z`, to a `.txt` file as one comma-separated row.
+
 Drag the horizontal divider below the control tabs to make the tab area taller or shorter. The shared action buttons, domain and grid summary, and compact validation-warning pane remain available below the divider.
 
 ## Repository Layout
@@ -139,11 +143,11 @@ FarmVis supports two base-grid input modes.
 
 #### Resolution input
 
-Enter target values for `d_x`, `d_y`, and `d_z`. FarmVis rounds the corresponding cell counts to the nearest positive integers and reports the effective spacing implied by those counts.
+Enter target values for `d_x` and `d_y`. For a uniform vertical grid, also enter `d_z`. FarmVis rounds the corresponding cell counts to the nearest positive integers and reports the effective spacing implied by those counts.
 
 #### Grid counts
 
-Enter `N_x`, `N_y`, and `N_z` directly. FarmVis calculates spacing as:
+Enter `N_x`, `N_y`, and `N_z` directly. FarmVis calculates the horizontal spacing—and uniform vertical spacing when selected—as:
 
 ```text
 d_x = total solved x length / N_x
@@ -152,6 +156,38 @@ d_z = L_z / N_z
 ```
 
 `N_x`, `N_y`, and `N_z` represent cell counts rather than node counts.
+
+### Vertical discretization
+
+The vertical grid can be configured independently of the horizontal input mode:
+
+- **Uniform** uses the existing `d_z` input in resolution mode or `N_z` in grid-count mode.
+- **Stretched** accepts an initial `d_z` plus either a stretching ratio such as `1.03` or a target final `d_z`. A selector determines which parameterization is active, so the ratio and final spacing cannot be entered together. In resolution mode, FarmVis chooses the integer `N_z` whose implied height is nearest to `L_z`; in grid-count mode, it uses the entered `N_z`.
+- **Hyperbolic tangent** uses a one-sided tanh mapping that concentrates cells near the ground and smoothly increases their height toward the domain top. It can be parameterized by either a stretching factor or a target final `d_z`, but never both. Resolution mode also accepts a target initial `d_z`; grid-count mode uses the entered `N_z`.
+- **Piecewise** uses a uniform lower region from the surface to a requested transition height `z_t`, followed by a geometrically stretched upper region. Enter the lower-region `d_z` and choose either a stretching ratio or a target final `d_z`. Piecewise mode derives its vertical cell count from these inputs, even when the horizontal grid uses grid-count mode.
+
+For a stretched grid, the exact initial spacing is adjusted so the grid terminates at the prescribed domain height:
+
+```text
+d_z(k) = d_z(0) r^k
+d_z(0) = L_z (r - 1) / (r^N_z - 1)
+```
+
+When a stretched grid is specified by its final spacing, FarmVis derives the geometric ratio from the requested endpoints. The final grid is scaled to terminate exactly at `L_z`, and the summary distinguishes the requested endpoint spacings from their actual values.
+
+Piecewise mode rounds the requested lower region to an integer number of uniform cells and derives the upper-region cell count. A common scale adjustment then makes the complete grid terminate exactly at `L_z` while keeping the first upper cell equal to the lower uniform spacing. The summary reports requested and actual `z_t`, lower and upper cell counts, actual endpoint spacing, and the solved ratio.
+
+The summary reports the requested and actual endpoint spacing, solved stretching ratio or factor, vertical cell count, and the nearest height corresponding to the requested spacing. AMR is limited to maximum level 0 whenever a non-uniform vertical discretization is selected.
+
+For the hyperbolic tangent grid, edge `k` is placed using:
+
+```text
+eta_k = k / N_z
+G(eta) = eta + [ln(cosh(beta (eta - 1))) - ln(cosh(beta))] / beta
+z_k = L_z G(eta_k) / G(1)
+```
+
+Here `beta` is the stretching factor. Larger values concentrate more cells near `z = 0`. This orientation makes cell spacing change slowly near the surface and increasingly rapidly toward the domain top. In resolution mode, FarmVis chooses the integer `N_z` whose first-cell height is nearest to the requested initial `d_z`. When final-spacing mode is selected, FarmVis solves `beta` from the requested endpoint relationship; with an explicit `N_z`, it solves `beta` so the final cell matches the requested value.
 
 ### Inflow region
 
@@ -182,6 +218,8 @@ It remains inside `L_z`; it does not increase the domain height. The visualizati
 ## AMR Controls
 
 Set **Maximum level** to `0` to use only the base grid. Increasing it creates one expandable control page per refinement level.
+
+AMR levels are available only with **Uniform** vertical discretization. Selecting either non-uniform option resets and disables **Maximum level**.
 
 Each level includes:
 
@@ -287,15 +325,11 @@ The control panel reports:
 - Overlap-aware total solved cells
 - Cube-equivalent grid size
 - Grid points across the rotor diameter in each direction
-- Vertical grid points between the ground and rotor bottom
+- Domain vertical cell count and the number of complete vertical cells below the rotor bottom
 - Total turbine count
 - Per-level AMR extents, resolution, grid shape, and cell count
 
-The `z points to rotor` metric is:
-
-```text
-(hub height - rotor diameter / 2) / d_z
-```
+For stretched grids, the farm vertical-cell metric follows the geometric cell edges rather than dividing by a single uniform `d_z`.
 
 Validation warnings identify conditions such as turbines outside the main domain, rotors intersecting the ground or damping region, invalid AMR bounds, non-nested AMR levels, and box lengths that do not divide evenly by the refined spacing.
 

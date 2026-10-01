@@ -14,6 +14,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from PySide6 import QtCore, QtWidgets
 from pyvistaqt import BackgroundPlotter
 
@@ -24,8 +25,10 @@ from farmvis_tool import (
     FarmStudyConfig,
     compute_amr_metrics,
     compute_grid_metrics,
+    compute_vertical_grid_profile,
     configs_from_preset,
     export_cluster_coordinates,
+    export_vertical_grid_levels,
     generate_all_layouts,
     list_layout_presets,
     load_layout_preset,
@@ -93,6 +96,47 @@ class TwoDWindow(QtWidgets.QMainWindow):
             self.canvases[label] = canvas
 
 
+class VerticalGridWindow(QtWidgets.QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Vertical Grid Discretization")
+        self.resize(720, 760)
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(container)
+        self.canvas = FigureCanvasQTAgg(plt.Figure())
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.canvas)
+        self.setCentralWidget(container)
+
+    def update_profile(self, domain: DomainConfig) -> None:
+        profile = compute_vertical_grid_profile(domain)
+        cell_sizes = profile["cell_sizes"]
+        cell_centers = profile["cell_centers"]
+        z_levels = profile["z_levels"]
+        x_max = float(np.max(cell_sizes))
+        x_limit = x_max * 1.05 if x_max > 0.0 else 1.0
+
+        self.canvas.figure.clear()
+        ax = self.canvas.figure.add_subplot(111)
+        ax.hlines(
+            z_levels,
+            xmin=0.0,
+            xmax=x_limit,
+            colors="lightgray",
+            linewidth=0.6,
+            zorder=0,
+        )
+        ax.plot(cell_sizes, cell_centers, color="black", linewidth=2.0, zorder=2)
+        ax.set_xlabel(r"$\Delta z$ (m)")
+        ax.set_ylabel(r"$z$ (m)")
+        ax.set_title(f"{profile['type'].replace('_', ' ').title()} Vertical Grid")
+        ax.set_xlim(0.0, x_limit)
+        ax.set_ylim(0.0, domain.Lz)
+        ax.set_axisbelow(True)
+        self.canvas.figure.tight_layout()
+        self.canvas.draw_idle()
+
 class FarmVisWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -105,6 +149,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self._turbine_signature: tuple | None = None
         self._rotor_angles: list[np.ndarray] | None = None
         self.two_d_window = TwoDWindow()
+        self.vertical_grid_window: VerticalGridWindow | None = None
 
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
@@ -194,19 +239,102 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         resolution_layout.setContentsMargins(0, 0, 0, 0)
         self.dx = self._float(20.0, minimum=0.001)
         self.dy = self._float(20.0, minimum=0.001)
-        self.dz = self._float(10.0, minimum=0.001)
-        resolution_layout.addWidget(self._form_row(("d_x (m)", self.dx), ("d_y (m)", self.dy), ("d_z (m)", self.dz)))
+        resolution_layout.addWidget(self._form_row(("d_x (m)", self.dx), ("d_y (m)", self.dy)))
         count_page = QtWidgets.QWidget()
         count_layout = QtWidgets.QHBoxLayout(count_page)
         count_layout.setContentsMargins(0, 0, 0, 0)
         self.nx = self._int(600, minimum=1)
         self.ny = self._int(300, minimum=1)
         self.nz = self._int(150, minimum=1)
-        count_layout.addWidget(self._form_row(("N_x", self.nx), ("N_y", self.ny), ("N_z", self.nz)))
+        count_layout.addWidget(self._form_row(("N_x", self.nx), ("N_y", self.ny)))
         self.grid_stack.addWidget(resolution_page)
         self.grid_stack.addWidget(count_page)
         layout.addWidget(self.grid_stack)
         self.grid_mode.currentIndexChanged.connect(self.grid_stack.setCurrentIndex)
+
+        self.vertical_discretization = QtWidgets.QComboBox()
+        self.vertical_discretization.addItem("Uniform", "uniform")
+        self.vertical_discretization.addItem("Stretched", "stretched")
+        self.vertical_discretization.addItem("Hyperbolic tangent", "hyperbolic_tangent")
+        self.vertical_discretization.addItem("Piecewise", "piecewise")
+        layout.addWidget(self._form_row(("Vertical discretization", self.vertical_discretization)))
+
+        self.dz = self._float(10.0, minimum=0.001)
+        self.initial_dz = self._float(10.0, minimum=0.001)
+        self.stretching_ratio = QtWidgets.QDoubleSpinBox()
+        self.stretching_ratio.setRange(1.000001, 10.0)
+        self.stretching_ratio.setDecimals(6)
+        self.stretching_ratio.setSingleStep(0.01)
+        self.stretching_ratio.setValue(1.03)
+        self.stretched_final_dz = self._float(50.0, minimum=0.001)
+        self.stretched_parameter_mode = QtWidgets.QComboBox()
+        self.stretched_parameter_mode.addItem("Stretching ratio", "ratio")
+        self.stretched_parameter_mode.addItem("Final d_z", "final_dz")
+        self.uniform_dz_row = self._form_row(("d_z (m)", self.dz))
+        self.vertical_nz_row = self._form_row(("N_z", self.nz))
+        self.stretched_initial_row = self._form_row(("initial d_z (m)", self.initial_dz))
+        self.stretched_mode_row = self._form_row(("Specify stretching with", self.stretched_parameter_mode))
+        self.stretched_ratio_row = self._form_row(("stretching ratio", self.stretching_ratio))
+        self.stretched_final_row = self._form_row(("final d_z (m)", self.stretched_final_dz))
+        self.tanh_initial_dz = self._float(10.0, minimum=0.001)
+        self.tanh_stretching_factor = QtWidgets.QDoubleSpinBox()
+        self.tanh_stretching_factor.setRange(0.000001, 10.0)
+        self.tanh_stretching_factor.setDecimals(6)
+        self.tanh_stretching_factor.setSingleStep(0.1)
+        self.tanh_stretching_factor.setValue(2.0)
+        self.tanh_stretching_factor.setToolTip(
+            "Larger values concentrate more vertical cells near the ground."
+        )
+        self.tanh_final_dz = self._float(50.0, minimum=0.001)
+        self.tanh_parameter_mode = QtWidgets.QComboBox()
+        self.tanh_parameter_mode.addItem("Stretching factor", "factor")
+        self.tanh_parameter_mode.addItem("Final d_z", "final_dz")
+        self.tanh_initial_row = self._form_row(("initial d_z (m)", self.tanh_initial_dz))
+        self.tanh_mode_row = self._form_row(("Specify stretching with", self.tanh_parameter_mode))
+        self.tanh_factor_row = self._form_row(("stretching factor", self.tanh_stretching_factor))
+        self.tanh_final_row = self._form_row(("final d_z (m)", self.tanh_final_dz))
+        self.piecewise_uniform_dz = self._float(10.0, minimum=0.001)
+        self.piecewise_transition_height = self._float(300.0, minimum=0.001, step=25.0)
+        self.piecewise_stretching_ratio = QtWidgets.QDoubleSpinBox()
+        self.piecewise_stretching_ratio.setRange(1.000001, 10.0)
+        self.piecewise_stretching_ratio.setDecimals(6)
+        self.piecewise_stretching_ratio.setSingleStep(0.01)
+        self.piecewise_stretching_ratio.setValue(1.03)
+        self.piecewise_final_dz = self._float(50.0, minimum=0.001)
+        self.piecewise_parameter_mode = QtWidgets.QComboBox()
+        self.piecewise_parameter_mode.addItem("Stretching ratio", "ratio")
+        self.piecewise_parameter_mode.addItem("Final d_z", "final_dz")
+        self.piecewise_base_row = self._form_row(
+            ("uniform d_z (m)", self.piecewise_uniform_dz),
+            ("z_t (m)", self.piecewise_transition_height),
+        )
+        self.piecewise_mode_row = self._form_row(
+            ("Specify stretching with", self.piecewise_parameter_mode)
+        )
+        self.piecewise_ratio_row = self._form_row(
+            ("stretching ratio", self.piecewise_stretching_ratio)
+        )
+        self.piecewise_final_row = self._form_row(("final d_z (m)", self.piecewise_final_dz))
+        layout.addWidget(self.uniform_dz_row)
+        layout.addWidget(self.vertical_nz_row)
+        layout.addWidget(self.stretched_initial_row)
+        layout.addWidget(self.stretched_mode_row)
+        layout.addWidget(self.stretched_ratio_row)
+        layout.addWidget(self.stretched_final_row)
+        layout.addWidget(self.tanh_initial_row)
+        layout.addWidget(self.tanh_mode_row)
+        layout.addWidget(self.tanh_factor_row)
+        layout.addWidget(self.tanh_final_row)
+        layout.addWidget(self.piecewise_base_row)
+        layout.addWidget(self.piecewise_mode_row)
+        layout.addWidget(self.piecewise_ratio_row)
+        layout.addWidget(self.piecewise_final_row)
+        self.grid_mode.currentIndexChanged.connect(self._update_vertical_controls)
+        self.vertical_discretization.currentIndexChanged.connect(self._update_vertical_controls)
+        self.stretched_parameter_mode.currentIndexChanged.connect(self._update_vertical_controls)
+        self.tanh_parameter_mode.currentIndexChanged.connect(self._update_vertical_controls)
+        self.piecewise_parameter_mode.currentIndexChanged.connect(self._update_vertical_controls)
+        self._update_vertical_controls()
 
         self.inflow_enabled = QtWidgets.QCheckBox("Enable inflow region")
         self.inflow_enabled.setChecked(True)
@@ -226,6 +354,47 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.amr_toolbox = QtWidgets.QToolBox()
         layout.addWidget(self.amr_toolbox)
         self.max_level.valueChanged.connect(self._rebuild_amr_editors)
+        self._update_amr_availability()
+
+    def _update_vertical_controls(self, _index: int | None = None) -> None:
+        vertical_type = self.vertical_discretization.currentData()
+        counts_mode = self.grid_mode.currentData() == "counts"
+        self.uniform_dz_row.setVisible(vertical_type == "uniform" and not counts_mode)
+        self.vertical_nz_row.setVisible(counts_mode and vertical_type != "piecewise")
+        stretched = vertical_type == "stretched"
+        self.stretched_initial_row.setVisible(stretched)
+        self.stretched_mode_row.setVisible(stretched)
+        self.stretched_ratio_row.setVisible(
+            stretched and self.stretched_parameter_mode.currentData() == "ratio"
+        )
+        self.stretched_final_row.setVisible(
+            stretched and self.stretched_parameter_mode.currentData() == "final_dz"
+        )
+        self.tanh_initial_row.setVisible(vertical_type == "hyperbolic_tangent" and not counts_mode)
+        tanh = vertical_type == "hyperbolic_tangent"
+        self.tanh_mode_row.setVisible(tanh)
+        self.tanh_factor_row.setVisible(tanh and self.tanh_parameter_mode.currentData() == "factor")
+        self.tanh_final_row.setVisible(tanh and self.tanh_parameter_mode.currentData() == "final_dz")
+        piecewise = vertical_type == "piecewise"
+        self.piecewise_base_row.setVisible(piecewise)
+        self.piecewise_mode_row.setVisible(piecewise)
+        self.piecewise_ratio_row.setVisible(
+            piecewise and self.piecewise_parameter_mode.currentData() == "ratio"
+        )
+        self.piecewise_final_row.setVisible(
+            piecewise and self.piecewise_parameter_mode.currentData() == "final_dz"
+        )
+        self._update_amr_availability()
+
+    def _update_amr_availability(self) -> None:
+        if not hasattr(self, "max_level") or not hasattr(self, "vertical_discretization"):
+            return
+        uniform = self.vertical_discretization.currentData() == "uniform"
+        if not uniform:
+            self.max_level.setValue(0)
+        self.max_level.setEnabled(uniform)
+        self.amr_toolbox.setEnabled(uniform)
+        self.max_level.setToolTip("" if uniform else "AMR is unavailable for non-uniform vertical grids.")
 
     def _build_farm_controls(self) -> None:
         layout = self._control_tab("Wind Farm")
@@ -292,16 +461,22 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         save_2d_button = QtWidgets.QPushButton("Save 2D Screenshot")
         show_3d_button = QtWidgets.QPushButton("Show 3D Window")
         show_2d_button = QtWidgets.QPushButton("Show 2D Window")
+        plot_vertical_grid_button = QtWidgets.QPushButton("Plot Vertical Grid")
+        save_grid_levels_button = QtWidgets.QPushButton("Save grid levels")
         update_button.clicked.connect(self.update_visualization)
         export_button.clicked.connect(self.export_coordinates)
         save_2d_button.clicked.connect(self.save_2d_screenshot)
         show_3d_button.clicked.connect(self.show_3d)
         show_2d_button.clicked.connect(self.two_d_window.show)
+        plot_vertical_grid_button.clicked.connect(self.plot_vertical_grid)
+        save_grid_levels_button.clicked.connect(self.save_grid_levels)
         action_grid.addWidget(update_button, 0, 0)
         action_grid.addWidget(export_button, 0, 1)
         action_grid.addWidget(save_2d_button, 0, 2)
         action_grid.addWidget(show_3d_button, 1, 0)
         action_grid.addWidget(show_2d_button, 1, 1)
+        action_grid.addWidget(plot_vertical_grid_button, 1, 2)
+        action_grid.addWidget(save_grid_levels_button, 2, 0)
         for column in range(3):
             action_grid.setColumnStretch(column, 1)
         output_layout.addLayout(action_grid)
@@ -438,6 +613,38 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             grid_mode=self.grid_mode.currentData(),
             dx=self.dx.value(), dy=self.dy.value(), dz=self.dz.value(),
             Nx=self.nx.value(), Ny=self.ny.value(), Nz=self.nz.value(),
+            vertical_discretization=self.vertical_discretization.currentData(),
+            initial_dz=self.initial_dz.value(),
+            stretching_ratio=(
+                self.stretching_ratio.value()
+                if self.stretched_parameter_mode.currentData() == "ratio" else None
+            ),
+            stretched_parameter_mode=self.stretched_parameter_mode.currentData(),
+            stretched_final_dz=(
+                self.stretched_final_dz.value()
+                if self.stretched_parameter_mode.currentData() == "final_dz" else None
+            ),
+            tanh_initial_dz=self.tanh_initial_dz.value(),
+            tanh_stretching_factor=(
+                self.tanh_stretching_factor.value()
+                if self.tanh_parameter_mode.currentData() == "factor" else None
+            ),
+            tanh_parameter_mode=self.tanh_parameter_mode.currentData(),
+            tanh_final_dz=(
+                self.tanh_final_dz.value()
+                if self.tanh_parameter_mode.currentData() == "final_dz" else None
+            ),
+            piecewise_uniform_dz=self.piecewise_uniform_dz.value(),
+            piecewise_transition_height=self.piecewise_transition_height.value(),
+            piecewise_parameter_mode=self.piecewise_parameter_mode.currentData(),
+            piecewise_stretching_ratio=(
+                self.piecewise_stretching_ratio.value()
+                if self.piecewise_parameter_mode.currentData() == "ratio" else None
+            ),
+            piecewise_final_dz=(
+                self.piecewise_final_dz.value()
+                if self.piecewise_parameter_mode.currentData() == "final_dz" else None
+            ),
             inflow_enabled=self.inflow_enabled.isChecked(), Lin=self.lin.value(),
             rayleigh_enabled=self.rayleigh_enabled.isChecked(), rayleigh_depth=self.rayleigh_depth.value(),
             max_level=self.max_level.value(),
@@ -457,20 +664,79 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         warnings = validate_configuration(domain, study, layouts) + amr["warnings"]
         return domain, study, metrics, amr, layouts, warnings
 
-    def _summary_html(self, study: FarmStudyConfig, metrics: dict, amr: dict, layouts: dict) -> str:
+    def _summary_html(
+        self,
+        domain: DomainConfig,
+        study: FarmStudyConfig,
+        metrics: dict,
+        amr: dict,
+        layouts: dict,
+    ) -> str:
         counts, spacing, lengths = metrics["counts"], metrics["spacing"], metrics["domain_lengths"]
+        vertical = metrics["vertical_grid"]
         total_counts = amr["total_counts"] if amr["levels"] else counts
         total_cells = amr["total_cells"] if amr["levels"] else metrics["total_cells"]
         total_cube = amr["cube_equivalent"] if amr["levels"] else metrics["cube_equivalent"]
-        rotor_bottom = study.hub_height - 0.5 * study.rotor_diameter
+        rotor_bottom = max(0.0, study.hub_height - 0.5 * study.rotor_diameter)
+        vertical_profile = compute_vertical_grid_profile(domain)
+        farm_vertical_cells = min(
+            counts["Nz"],
+            max(0, int(np.searchsorted(vertical_profile["z_levels"], rotor_bottom, side="right") - 1)),
+        )
         rows = [
             ("Main L_x (m)", lengths["Lx_main"]), ("Solved L_x (m)", lengths["Lx_total"]), ("L_y (m)", lengths["Ly"]), ("L_z (m)", lengths["Lz"]),
+            ("Vertical discretization", vertical["type"].replace("_", " ").title()),
+            ("Domain vertical cells (N_z)", counts["Nz"]),
+            ("Farm vertical cells to rotor bottom", farm_vertical_cells),
             ("Base N_x / N_y / N_z", f"{counts['Nx']} / {counts['Ny']} / {counts['Nz']}"),
             ("Total N_x / N_y / N_z", f"{total_counts['Nx']} / {total_counts['Ny']} / {total_counts['Nz']}"),
-            ("Base d_x / d_y / d_z (m)", f"{spacing['dx']:.3f} / {spacing['dy']:.3f} / {spacing['dz']:.3f}"),
-            ("z points to rotor", f"{rotor_bottom / spacing['dz']:.3f}"),
+            ("Base d_x / d_y (m)", f"{spacing['dx']:.3f} / {spacing['dy']:.3f}"),
             ("Total cells", f"{total_cells:,}"), ("Cube-equivalent", f"~{total_cube:.3f}^3"), ("Total turbines", layouts["total_turbines"]),
         ]
+        if vertical["type"] == "uniform":
+            rows.append(("d_z (m)", f"{vertical['actual_initial_dz']:.6f}"))
+        elif vertical["type"] == "stretched":
+            rows.append(("Requested initial d_z (m)", f"{vertical['requested_initial_dz']:.6f}"))
+            if vertical["requested_final_dz"] is not None:
+                rows.append(("Requested final d_z (m)", f"{vertical['requested_final_dz']:.6f}"))
+            rows.extend(
+                [
+                    ("Actual initial d_z (m)", f"{vertical['actual_initial_dz']:.6f}"),
+                    ("Actual final d_z (m)", f"{vertical['final_dz']:.6f}"),
+                    ("Stretching ratio", f"{vertical['stretching_ratio']:.6f}"),
+                    ("Nearest H for requested spacing", f"{vertical['nearest_height']:.6f}"),
+                ]
+            )
+        elif vertical["type"] == "piecewise":
+            rows.extend(
+                [
+                    ("Requested uniform d_z (m)", f"{vertical['requested_initial_dz']:.6f}"),
+                    ("Requested z_t (m)", f"{vertical['requested_transition_height']:.6f}"),
+                ]
+            )
+            if vertical["requested_final_dz"] is not None:
+                rows.append(("Requested final d_z (m)", f"{vertical['requested_final_dz']:.6f}"))
+            rows.extend(
+                [
+                    ("Actual uniform d_z (m)", f"{vertical['actual_initial_dz']:.6f}"),
+                    ("Actual z_t (m)", f"{vertical['actual_transition_height']:.6f}"),
+                    ("Actual final d_z (m)", f"{vertical['final_dz']:.6f}"),
+                    ("Stretching ratio", f"{vertical['stretching_ratio']:.6f}"),
+                    ("Uniform / stretched cells", f"{vertical['uniform_cell_count']} / {vertical['stretched_cell_count']}"),
+                ]
+            )
+        else:
+            if vertical["requested_initial_dz"] is not None:
+                rows.append(("Requested initial d_z (m)", f"{vertical['requested_initial_dz']:.6f}"))
+            if vertical["requested_final_dz"] is not None:
+                rows.append(("Requested final d_z (m)", f"{vertical['requested_final_dz']:.6f}"))
+            rows.extend(
+                [
+                    ("Actual initial d_z (m)", f"{vertical['actual_initial_dz']:.6f}"),
+                    ("Final d_z (m)", f"{vertical['final_dz']:.6f}"),
+                    ("Tanh stretching factor", f"{vertical['tanh_stretching_factor']:.6f}"),
+                ]
+            )
         def table(title: str, pairs: list[tuple[str, object]]) -> str:
             body = "".join(f"<tr><td>{html.escape(str(key))}</td><td>{html.escape(str(value))}</td></tr>" for key, value in pairs)
             return f"<h3>{title}</h3><table border='1' cellspacing='0' cellpadding='4'>{body}</table>"
@@ -493,7 +759,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         try:
             domain, study, metrics, amr, layouts, warnings = self._compute_state()
             self.warning_box.setPlainText("\n".join(warnings) if warnings else "No validation warnings.")
-            self.summary_box.setHtml(self._summary_html(study, metrics, amr, layouts))
+            self.summary_box.setHtml(self._summary_html(domain, study, metrics, amr, layouts))
             self._update_3d(domain, study, metrics, amr, layouts)
             self.two_d_window.update_figures(domain, study, layouts, amr)
             self.show_3d()
@@ -579,6 +845,36 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             window.activateWindow()
             self.plotter.render()
 
+    def plot_vertical_grid(self) -> None:
+        try:
+            domain = self._build_domain_config()
+            if self.vertical_grid_window is None:
+                self.vertical_grid_window = VerticalGridWindow()
+            self.vertical_grid_window.update_profile(domain)
+            self.vertical_grid_window.showNormal()
+            self.vertical_grid_window.raise_()
+            self.vertical_grid_window.activateWindow()
+        except Exception as error:
+            QtWidgets.QMessageBox.critical(self, "Vertical grid plot failed", str(error))
+
+    def save_grid_levels(self) -> None:
+        output, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Vertical Grid Levels",
+            str(OUTPUT_DIR / "vertical_grid_levels.txt"),
+            "Text file (*.txt)",
+        )
+        if not output:
+            return
+        output_path = Path(output)
+        if output_path.suffix.lower() != ".txt":
+            output_path = output_path.with_suffix(".txt")
+        try:
+            saved = export_vertical_grid_levels(self._build_domain_config(), output_path)
+            QtWidgets.QMessageBox.information(self, "Grid levels saved", f"Grid levels saved to:\n{saved}")
+        except Exception as error:
+            QtWidgets.QMessageBox.critical(self, "Grid level export failed", str(error))
+
     def save_2d_screenshot(self) -> None:
         output, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
@@ -653,15 +949,39 @@ class FarmVisWindow(QtWidgets.QMainWindow):
     def _apply_configs(self, domain: DomainConfig, study: FarmStudyConfig) -> None:
         self.lx.setValue(domain.Lx); self.ly.setValue(domain.Ly); self.lz.setValue(domain.Lz)
         self.grid_mode.setCurrentIndex(0 if domain.grid_mode == "resolution" else 1)
+        vertical_index = self.vertical_discretization.findData(domain.vertical_discretization)
+        self.vertical_discretization.setCurrentIndex(max(0, vertical_index))
         if domain.dx is not None: self.dx.setValue(domain.dx)
         if domain.dy is not None: self.dy.setValue(domain.dy)
         if domain.dz is not None: self.dz.setValue(domain.dz)
         if domain.Nx is not None: self.nx.setValue(domain.Nx)
         if domain.Ny is not None: self.ny.setValue(domain.Ny)
         if domain.Nz is not None: self.nz.setValue(domain.Nz)
+        if domain.initial_dz is not None: self.initial_dz.setValue(domain.initial_dz)
+        if domain.stretching_ratio is not None: self.stretching_ratio.setValue(domain.stretching_ratio)
+        stretched_mode_index = self.stretched_parameter_mode.findData(domain.stretched_parameter_mode)
+        self.stretched_parameter_mode.setCurrentIndex(max(0, stretched_mode_index))
+        if domain.stretched_final_dz is not None:
+            self.stretched_final_dz.setValue(domain.stretched_final_dz)
+        if domain.tanh_initial_dz is not None: self.tanh_initial_dz.setValue(domain.tanh_initial_dz)
+        if domain.tanh_stretching_factor is not None:
+            self.tanh_stretching_factor.setValue(domain.tanh_stretching_factor)
+        tanh_mode_index = self.tanh_parameter_mode.findData(domain.tanh_parameter_mode)
+        self.tanh_parameter_mode.setCurrentIndex(max(0, tanh_mode_index))
+        if domain.tanh_final_dz is not None: self.tanh_final_dz.setValue(domain.tanh_final_dz)
+        if domain.piecewise_uniform_dz is not None:
+            self.piecewise_uniform_dz.setValue(domain.piecewise_uniform_dz)
+        if domain.piecewise_transition_height is not None:
+            self.piecewise_transition_height.setValue(domain.piecewise_transition_height)
+        piecewise_mode_index = self.piecewise_parameter_mode.findData(domain.piecewise_parameter_mode)
+        self.piecewise_parameter_mode.setCurrentIndex(max(0, piecewise_mode_index))
+        if domain.piecewise_stretching_ratio is not None:
+            self.piecewise_stretching_ratio.setValue(domain.piecewise_stretching_ratio)
+        if domain.piecewise_final_dz is not None:
+            self.piecewise_final_dz.setValue(domain.piecewise_final_dz)
         self.inflow_enabled.setChecked(domain.inflow_enabled); self.lin.setValue(domain.Lin)
         self.rayleigh_enabled.setChecked(domain.rayleigh_enabled); self.rayleigh_depth.setValue(domain.rayleigh_depth)
-        self.max_level.setValue(domain.max_level)
+        self.max_level.setValue(domain.max_level if domain.vertical_discretization == "uniform" else 0)
         self.rotor_diameter.setValue(study.rotor_diameter)
         self.hub_height.setValue(study.hub_height)
         self._sync_turbine_preset(study.rotor_diameter, study.hub_height)
@@ -685,6 +1005,8 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         if self.plotter is not None:
             self.plotter.close()
         self.two_d_window.close()
+        if self.vertical_grid_window is not None:
+            self.vertical_grid_window.close()
         event.accept()
 
 
