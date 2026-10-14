@@ -303,6 +303,8 @@ Typical PyVista mouse controls are:
 
 The 3D camera uses atmospheric coordinates: `+x` is downstream, `+y` is left when facing downstream, and `+z` is upward. The initial elevated view is from upstream and to the right, looking downstream into the domain. The camera toolbar follows the same convention: Front/Upstream looks along `+x`, Back/Downstream along `-x`, Left along `+y`, Right along `-y`, Top along `-z`, and Bottom along `+z`.
 
+Select **View → Camera → Camera Coordinates...** in the live PyVista window, or use the matching camera-toolbar button, to enter the camera position, focal point, and view-up vector numerically. **Read Current Camera** copies the current interactive view into the fields, and **Apply** updates the live view without rebuilding the scene.
+
 Click **Show 3D Window** to restore or bring the native PyVista window to the foreground.
 
 Screenshots saved from **File → Take Screenshot** use a transparent background by default when written to a format that supports alpha transparency, such as PNG. The live 3D window retains its white background.

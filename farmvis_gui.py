@@ -137,6 +137,107 @@ class VerticalGridWindow(QtWidgets.QMainWindow):
         self.canvas.figure.tight_layout()
         self.canvas.draw_idle()
 
+
+class CameraControlDialog(QtWidgets.QDialog):
+    """Modeless coordinate editor for the live PyVista camera."""
+
+    def __init__(self, plotter: BackgroundPlotter) -> None:
+        super().__init__(plotter.app_window)
+        self.plotter = plotter
+        self.setWindowTitle("Camera Coordinates")
+        self.setModal(False)
+        self.setMinimumWidth(520)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        note = QtWidgets.QLabel("Atmospheric coordinates: +x downstream, +y left, and +z upward.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.position_fields = self._add_vector_row(layout, "Camera position")
+        self.focal_fields = self._add_vector_row(layout, "Focal point")
+        self.view_up_fields = self._add_vector_row(layout, "View-up vector", step=0.1)
+
+        buttons = QtWidgets.QHBoxLayout()
+        read_button = QtWidgets.QPushButton("Read Current Camera")
+        apply_button = QtWidgets.QPushButton("Apply")
+        close_button = QtWidgets.QPushButton("Close")
+        apply_button.setDefault(True)
+        read_button.clicked.connect(self.refresh_from_camera)
+        apply_button.clicked.connect(self.apply_camera)
+        close_button.clicked.connect(self.close)
+        buttons.addWidget(read_button)
+        buttons.addStretch(1)
+        buttons.addWidget(apply_button)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+
+        self.refresh_from_camera()
+
+    @staticmethod
+    def _add_vector_row(
+        parent_layout: QtWidgets.QVBoxLayout,
+        title: str,
+        step: float = 100.0,
+    ) -> tuple[QtWidgets.QDoubleSpinBox, QtWidgets.QDoubleSpinBox, QtWidgets.QDoubleSpinBox]:
+        group = QtWidgets.QGroupBox(title)
+        row = QtWidgets.QHBoxLayout(group)
+        fields: list[QtWidgets.QDoubleSpinBox] = []
+        for axis in ("x", "y", "z"):
+            field = QtWidgets.QDoubleSpinBox()
+            field.setRange(-1.0e12, 1.0e12)
+            field.setDecimals(6)
+            field.setSingleStep(step)
+            field.setKeyboardTracking(False)
+            row.addWidget(QtWidgets.QLabel(axis))
+            row.addWidget(field)
+            fields.append(field)
+        parent_layout.addWidget(group)
+        return fields[0], fields[1], fields[2]
+
+    @staticmethod
+    def _read_fields(fields: tuple[QtWidgets.QDoubleSpinBox, ...]) -> tuple[float, float, float]:
+        values = tuple(field.value() for field in fields)
+        return values[0], values[1], values[2]
+
+    @staticmethod
+    def _write_fields(fields: tuple[QtWidgets.QDoubleSpinBox, ...], values: tuple[float, float, float]) -> None:
+        for field, value in zip(fields, values, strict=True):
+            field.setValue(float(value))
+
+    def refresh_from_camera(self) -> None:
+        camera = self.plotter.camera
+        self._write_fields(self.position_fields, camera.position)
+        self._write_fields(self.focal_fields, camera.focal_point)
+        self._write_fields(self.view_up_fields, camera.up)
+
+    def apply_camera(self) -> None:
+        position = np.asarray(self._read_fields(self.position_fields), dtype=float)
+        focal_point = np.asarray(self._read_fields(self.focal_fields), dtype=float)
+        view_up = np.asarray(self._read_fields(self.view_up_fields), dtype=float)
+        view_direction = focal_point - position
+
+        if np.linalg.norm(view_direction) <= 1.0e-12:
+            QtWidgets.QMessageBox.warning(self, "Invalid camera", "Camera position and focal point must differ.")
+            return
+        if np.linalg.norm(view_up) <= 1.0e-12:
+            QtWidgets.QMessageBox.warning(self, "Invalid camera", "The view-up vector must be nonzero.")
+            return
+        if np.linalg.norm(np.cross(view_direction, view_up)) <= 1.0e-12 * np.linalg.norm(view_direction) * np.linalg.norm(view_up):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid camera",
+                "The view-up vector cannot be parallel to the viewing direction.",
+            )
+            return
+
+        camera = self.plotter.camera
+        camera.position = tuple(position)
+        camera.focal_point = tuple(focal_point)
+        camera.up = tuple(view_up)
+        self.plotter.reset_camera_clipping_range()
+        self.plotter.render()
+
+
 class FarmVisWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -148,6 +249,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self._rotor_angle_signature: tuple | None = None
         self._turbine_signature: tuple | None = None
         self._rotor_angles: list[np.ndarray] | None = None
+        self.camera_control_dialog: CameraControlDialog | None = None
         self.two_d_window = TwoDWindow()
         self.vertical_grid_window: VerticalGridWindow | None = None
 
@@ -836,6 +938,30 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             action.triggered.connect(
                 lambda _checked=False, vector=direction, up=view_up: self.plotter.view_vector(vector, up)
             )
+
+        camera_action = self.plotter.default_camera_tool_bar.addAction(
+            "Camera Coordinates...",
+            self.show_camera_controls,
+        )
+        for top_level_action in self.plotter.main_menu.actions():
+            top_level_menu = top_level_action.menu()
+            if top_level_menu is None or top_level_menu.title().replace("&", "") != "View":
+                continue
+            for menu_action in top_level_menu.actions():
+                submenu = menu_action.menu()
+                if submenu is not None and submenu.title().replace("&", "") == "Camera":
+                    submenu.addAction(camera_action)
+                    return
+
+    def show_camera_controls(self) -> None:
+        if self.plotter is None:
+            return
+        if self.camera_control_dialog is None:
+            self.camera_control_dialog = CameraControlDialog(self.plotter)
+        self.camera_control_dialog.refresh_from_camera()
+        self.camera_control_dialog.showNormal()
+        self.camera_control_dialog.raise_()
+        self.camera_control_dialog.activateWindow()
 
     def show_3d(self) -> None:
         if self.plotter is not None:
