@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "domain": {
+    "Lx": 40000.0,
+    "Ly": 24000.0,
+    "Lz": 5000.0,
+    "grid_mode": "resolution",
+    "dx": 31.25,
+    "dy": 31.25,
+    "dz": 10.0,
+    "Nx": 1500,
+    "Ny": 500,
+    "Nz": 150,
+    "vertical_discretization": "piecewise",
+    "initial_dz": 10.0,
+    "stretching_ratio": 1.03,
+    "stretched_parameter_mode": "ratio",
+    "stretched_final_dz": null,
+    "tanh_initial_dz": 10.0,
+    "tanh_stretching_factor": 2.0,
+    "tanh_parameter_mode": "factor",
+    "tanh_final_dz": null,
+    "piecewise_uniform_dz": 10.0,
+    "piecewise_transition_height": 1000.0,
+    "piecewise_parameter_mode": "final_dz",
+    "piecewise_stretching_ratio": null,
+    "piecewise_final_dz": 90.0,
+    "inflow_enabled": false,
+    "Lin": 8000.0,
+    "rayleigh_enabled": true,
+    "rayleigh_depth": 300.0,
+    "max_level": 0,
+    "amr_levels": []
+  },
+  "study": {
+    "rotor_diameter": 198.0,
+    "hub_height": 119.0,
+    "clusters": [
+      {
+        "cluster_id": 1,
+        "nx_turbines": 5,
+        "ny_turbines": 5,
+        "spacing_x_D": 5.0,
+        "spacing_y_D": 5.0,
+        "staggered": true,
+        "x_start": 6000.0,
+        "y_center": 3000.0,
+        "center_in_x": false,
+        "center_in_y": true,
+        "rotation_deg": 0.0
+      }
+    ]
+  }
+}
