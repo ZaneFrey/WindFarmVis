@@ -305,6 +305,8 @@ The 3D camera uses atmospheric coordinates: `+x` is downstream, `+y` is left whe
 
 Click **Show 3D Window** to restore or bring the native PyVista window to the foreground.
 
+Screenshots saved from **File → Take Screenshot** use a transparent background by default when written to a format that supports alpha transparency, such as PNG. The live 3D window retains its white background.
+
 ### 2D views
 
 The separate 2D window contains three tabs:

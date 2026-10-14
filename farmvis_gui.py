@@ -772,6 +772,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         created_plotter = self.plotter is None
         if self.plotter is None:
             self.plotter = BackgroundPlotter(show=False, app=QtWidgets.QApplication.instance(), title="FarmVis 3D Domain")
+            self.plotter.theme.transparent_background = True
             self._configure_camera_toolbar()
 
         cluster_values = tuple(
