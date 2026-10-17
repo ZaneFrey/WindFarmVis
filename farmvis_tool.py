@@ -25,6 +25,7 @@ class DomainConfig:
     Ny: int | None = None
     Nz: int | None = None
     vertical_discretization: str = "uniform"
+    exact_vertical_inputs: bool = False
     initial_dz: float | None = None
     stretching_ratio: float | None = None
     stretched_parameter_mode: str = "ratio"
@@ -95,6 +96,8 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
     if domain_config.rayleigh_enabled:
         _ensure_nonnegative(domain_config.rayleigh_depth, "rayleigh_depth")
 
+    requested_height = domain_config.Lz
+    effective_height = requested_height
     total_lengths = {
         "x": domain_config.Lx + inflow_length,
         "y": domain_config.Ly,
@@ -124,13 +127,13 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
     if vertical_type == "hyperbolic_tangent":
         if tanh_mode == "factor" and domain_config.tanh_final_dz is not None:
             raise ValueError("Provide either tanh_stretching_factor or tanh_final_dz, not both")
+        if tanh_mode == "final_dz" and domain_config.tanh_stretching_factor is not None:
+            raise ValueError("Provide either tanh_stretching_factor or tanh_final_dz, not both")
     if vertical_type == "piecewise":
         if piecewise_mode == "ratio" and domain_config.piecewise_final_dz is not None:
             raise ValueError("Provide either piecewise_stretching_ratio or piecewise_final_dz, not both")
         if piecewise_mode == "final_dz" and domain_config.piecewise_stretching_ratio is not None:
             raise ValueError("Provide either piecewise_stretching_ratio or piecewise_final_dz, not both")
-        if tanh_mode == "final_dz" and domain_config.tanh_stretching_factor is not None:
-            raise ValueError("Provide either tanh_stretching_factor or tanh_final_dz, not both")
 
     if grid_mode == "resolution":
         dx = _require_value(domain_config.dx, "dx")
@@ -208,6 +211,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
         tanh_factor = None
         nearest_height = None
         spacing["z"] = actual_initial_dz
+        effective_height = piecewise["effective_height"]
     elif vertical_type == "stretched":
         requested_initial_dz = _require_value(domain_config.initial_dz, "initial_dz")
         _ensure_positive(requested_initial_dz, "initial_dz")
@@ -223,7 +227,11 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 requested_initial_dz, requested_final_dz, counts["z"]
             )
         series_factor = _geometric_series_factor(stretching_ratio, counts["z"])
-        actual_initial_dz = total_lengths["z"] / series_factor
+        if domain_config.exact_vertical_inputs:
+            actual_initial_dz = requested_initial_dz
+            effective_height = requested_initial_dz * series_factor
+        else:
+            actual_initial_dz = total_lengths["z"] / series_factor
         nearest_height = requested_initial_dz * series_factor
         final_dz = actual_initial_dz * stretching_ratio ** (counts["z"] - 1)
         spacing["z"] = actual_initial_dz
@@ -244,8 +252,11 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 tanh_factor = _solve_tanh_factor_for_final(
                     total_lengths["z"], counts["z"], requested_final_dz
                 )
-        actual_initial_dz = _tanh_cell_size(total_lengths["z"], tanh_factor, counts["z"], 0)
-        final_dz = _tanh_cell_size(total_lengths["z"], tanh_factor, counts["z"], counts["z"] - 1)
+        if domain_config.exact_vertical_inputs and requested_initial_dz is not None:
+            initial_fraction = _tanh_cell_size(1.0, tanh_factor, counts["z"], 0)
+            effective_height = requested_initial_dz / initial_fraction
+        actual_initial_dz = _tanh_cell_size(effective_height, tanh_factor, counts["z"], 0)
+        final_dz = _tanh_cell_size(effective_height, tanh_factor, counts["z"], counts["z"] - 1)
         if actual_initial_dz <= 0.0:
             raise ValueError(
                 "tanh_stretching_factor and N_z produce an initial cell smaller than numerical precision"
@@ -258,17 +269,23 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
         requested_final_dz = spacing["z"]
         stretching_ratio = 1.0
         tanh_factor = None
-        actual_initial_dz = spacing["z"]
-        nearest_height = total_lengths["z"]
-        final_dz = spacing["z"]
+        if domain_config.exact_vertical_inputs and grid_mode == "resolution":
+            actual_initial_dz = _require_value(domain_config.dz, "dz")
+            effective_height = counts["z"] * actual_initial_dz
+        else:
+            actual_initial_dz = spacing["z"]
+        nearest_height = effective_height
+        final_dz = actual_initial_dz
+        spacing["z"] = actual_initial_dz
+    total_lengths["z"] = effective_height
     total_cells = counts["x"] * counts["y"] * counts["z"]
 
     return {
         "grid_mode": grid_mode,
         "domain_bounds": {
-            "main": (0.0, domain_config.Lx, 0.0, domain_config.Ly, 0.0, domain_config.Lz),
-            "full": (-inflow_length, domain_config.Lx, 0.0, domain_config.Ly, 0.0, domain_config.Lz),
-            "inflow": (-inflow_length, 0.0, 0.0, domain_config.Ly, 0.0, domain_config.Lz)
+            "main": (0.0, domain_config.Lx, 0.0, domain_config.Ly, 0.0, effective_height),
+            "full": (-inflow_length, domain_config.Lx, 0.0, domain_config.Ly, 0.0, effective_height),
+            "inflow": (-inflow_length, 0.0, 0.0, domain_config.Ly, 0.0, effective_height)
             if domain_config.inflow_enabled and inflow_length > 0.0
             else None,
             "rayleigh": (
@@ -276,8 +293,8 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 domain_config.Lx,
                 0.0,
                 domain_config.Ly,
-                max(0.0, domain_config.Lz - domain_config.rayleigh_depth),
-                domain_config.Lz,
+                max(0.0, effective_height - domain_config.rayleigh_depth),
+                effective_height,
             )
             if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0
             else None,
@@ -287,6 +304,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             "Lx_total": total_lengths["x"],
             "Ly": total_lengths["y"],
             "Lz": total_lengths["z"],
+            "Lz_requested": requested_height,
             "Lin": inflow_length,
             "rayleigh_depth": domain_config.rayleigh_depth if domain_config.rayleigh_enabled else 0.0,
         },
@@ -315,6 +333,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 else piecewise_mode if vertical_type == "piecewise"
                 else "uniform"
             ),
+            "exact_inputs": domain_config.exact_vertical_inputs,
         },
         "total_cells": total_cells,
         "cube_equivalent": total_cells ** (1.0 / 3.0),
@@ -326,6 +345,7 @@ def compute_vertical_grid_profile(domain_config: DomainConfig) -> dict[str, Any]
     metrics = compute_grid_metrics(domain_config)
     vertical = metrics["vertical_grid"]
     count = metrics["counts"]["Nz"]
+    height = metrics["domain_lengths"]["Lz"]
     if vertical["type"] == "piecewise":
         uniform_count = vertical["uniform_cell_count"]
         stretched_count = vertical["stretched_cell_count"]
@@ -340,7 +360,7 @@ def compute_vertical_grid_profile(domain_config: DomainConfig) -> dict[str, Any]
         factor = vertical["tanh_stretching_factor"]
         log_cosh_factor = np.log(np.cosh(factor))
         normalization = 1.0 - log_cosh_factor / factor
-        z_levels = domain_config.Lz * (
+        z_levels = height * (
             eta
             + (np.log(np.cosh(factor * (eta - 1.0))) - log_cosh_factor) / factor
         ) / normalization
@@ -350,7 +370,7 @@ def compute_vertical_grid_profile(domain_config: DomainConfig) -> dict[str, Any]
         cell_sizes = vertical["actual_initial_dz"] * vertical["stretching_ratio"] ** indices
         z_levels = np.concatenate(([0.0], np.cumsum(cell_sizes)))
     # Remove accumulated floating-point error at the prescribed domain top.
-    z_levels[-1] = domain_config.Lz
+    z_levels[-1] = height
     cell_centers = z_levels[:-1] + 0.5 * cell_sizes
     return {
         "type": vertical["type"],
@@ -651,6 +671,7 @@ def serialize_configs(
             "Ny": domain_config.Ny,
             "Nz": domain_config.Nz,
             "vertical_discretization": domain_config.vertical_discretization,
+            "exact_vertical_inputs": domain_config.exact_vertical_inputs,
             "initial_dz": domain_config.initial_dz,
             "stretching_ratio": domain_config.stretching_ratio,
             "stretched_parameter_mode": domain_config.stretched_parameter_mode,
@@ -770,6 +791,7 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         Ny=_optional_int(domain_data.get("Ny")),
         Nz=_optional_int(domain_data.get("Nz")),
         vertical_discretization=str(domain_data.get("vertical_discretization", "uniform")),
+        exact_vertical_inputs=bool(domain_data.get("exact_vertical_inputs", False)),
         initial_dz=_optional_float(domain_data.get("initial_dz")),
         stretching_ratio=_optional_float(domain_data.get("stretching_ratio")),
         stretched_parameter_mode=str(domain_data.get("stretched_parameter_mode", "ratio")),
@@ -838,8 +860,9 @@ def validate_configuration(
     layouts: dict[str, Any] | None = None,
 ) -> list[str]:
     warnings: list[str] = []
+    domain_height = compute_grid_metrics(domain_config)["domain_lengths"]["Lz"]
 
-    if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > domain_config.Lz:
+    if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > domain_height:
         warnings.append("Rayleigh damping depth exceeds L_z and extends below the domain floor.")
 
     if domain_config.inflow_enabled and domain_config.Lin <= 0.0:
@@ -852,16 +875,16 @@ def validate_configuration(
     rotor_top = study_config.hub_height + rotor_radius
     rotor_bottom = study_config.hub_height - rotor_radius
 
-    if rotor_top > domain_config.Lz:
+    if rotor_top > domain_height:
         warnings.append(
-            f"Rotor top at z={rotor_top:.3f} m exceeds the domain height L_z={domain_config.Lz:.3f} m."
+            f"Rotor top at z={rotor_top:.3f} m exceeds the domain height L_z={domain_height:.3f} m."
         )
     if rotor_bottom < 0.0:
         warnings.append(
             f"Rotor bottom at z={rotor_bottom:.3f} m lies below the domain floor z=0.000 m."
         )
 
-    rayleigh_floor = domain_config.Lz - domain_config.rayleigh_depth
+    rayleigh_floor = domain_height - domain_config.rayleigh_depth
     if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0 and rotor_top > rayleigh_floor:
         warnings.append(
             f"Rotor top at z={rotor_top:.3f} m intersects the Rayleigh damping region starting at z={rayleigh_floor:.3f} m."
@@ -1080,6 +1103,7 @@ def plot_xz(
     layouts: dict[str, Any],
     amr_metrics: dict[str, Any] | None = None,
 ) -> plt.Figure:
+    domain_height = compute_grid_metrics(domain_config)["domain_lengths"]["Lz"]
     fig, ax = plt.subplots(figsize=(10, 5))
     _add_xz_domain(ax, domain_config)
     if amr_metrics is not None:
@@ -1100,7 +1124,7 @@ def plot_xz(
     ax.set_ylabel("z (m)")
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(-domain_config.Lin if domain_config.inflow_enabled else 0.0, domain_config.Lx)
-    ax.set_ylim(0.0, domain_config.Lz)
+    ax.set_ylim(0.0, domain_height)
     ax.grid(True, linestyle=":", linewidth=0.5)
     fig.tight_layout()
     return fig
@@ -1112,6 +1136,7 @@ def plot_yz(
     layouts: dict[str, Any],
     amr_metrics: dict[str, Any] | None = None,
 ) -> plt.Figure:
+    domain_height = compute_grid_metrics(domain_config)["domain_lengths"]["Lz"]
     fig, ax = plt.subplots(figsize=(8, 5))
     _add_yz_domain(ax, domain_config)
     if amr_metrics is not None:
@@ -1135,7 +1160,7 @@ def plot_yz(
     ax.set_ylabel("z (m)")
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(0.0, domain_config.Ly)
-    ax.set_ylim(0.0, domain_config.Lz)
+    ax.set_ylim(0.0, domain_height)
     ax.grid(True, linestyle=":", linewidth=0.5)
     fig.tight_layout()
     return fig
@@ -1289,13 +1314,14 @@ def _add_xy_domain(ax: plt.Axes, domain_config: DomainConfig) -> None:
 
 
 def _add_xz_domain(ax: plt.Axes, domain_config: DomainConfig) -> None:
-    ax.add_patch(Rectangle((0.0, 0.0), domain_config.Lx, domain_config.Lz, fill=False, color="black", linewidth=1.5))
+    domain_height = compute_grid_metrics(domain_config)["domain_lengths"]["Lz"]
+    ax.add_patch(Rectangle((0.0, 0.0), domain_config.Lx, domain_height, fill=False, color="black", linewidth=1.5))
     if domain_config.inflow_enabled and domain_config.Lin > 0.0:
         ax.add_patch(
             Rectangle(
                 (-domain_config.Lin, 0.0),
                 domain_config.Lin,
-                domain_config.Lz,
+                domain_height,
                 fill=False,
                 color="black",
                 linewidth=1.2,
@@ -1304,10 +1330,10 @@ def _add_xz_domain(ax: plt.Axes, domain_config: DomainConfig) -> None:
         )
     if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0:
         xmin = -domain_config.Lin if domain_config.inflow_enabled else 0.0
-        zmin = max(0.0, domain_config.Lz - domain_config.rayleigh_depth)
+        zmin = max(0.0, domain_height - domain_config.rayleigh_depth)
         ax.plot(
             [domain_config.Lx, domain_config.Lx, np.nan, xmin, xmin],
-            [domain_config.Lz, zmin, np.nan, domain_config.Lz, zmin],
+            [domain_height, zmin, np.nan, domain_height, zmin],
             color="lightgray",
             linewidth=2.0,
             alpha=0.5,
@@ -1315,12 +1341,13 @@ def _add_xz_domain(ax: plt.Axes, domain_config: DomainConfig) -> None:
 
 
 def _add_yz_domain(ax: plt.Axes, domain_config: DomainConfig) -> None:
-    ax.add_patch(Rectangle((0.0, 0.0), domain_config.Ly, domain_config.Lz, fill=False, color="black", linewidth=1.5))
+    domain_height = compute_grid_metrics(domain_config)["domain_lengths"]["Lz"]
+    ax.add_patch(Rectangle((0.0, 0.0), domain_config.Ly, domain_height, fill=False, color="black", linewidth=1.5))
     if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0:
-        zmin = max(0.0, domain_config.Lz - domain_config.rayleigh_depth)
+        zmin = max(0.0, domain_height - domain_config.rayleigh_depth)
         ax.plot(
             [domain_config.Ly, domain_config.Ly, np.nan, 0.0, 0.0],
-            [domain_config.Lz, zmin, np.nan, domain_config.Lz, zmin],
+            [domain_height, zmin, np.nan, domain_height, zmin],
             color="lightgray",
             linewidth=2.0,
             alpha=0.5,
@@ -1491,7 +1518,12 @@ def _solve_piecewise_grid(domain_config: DomainConfig) -> dict[str, Any]:
         )
 
     stretched_factor = _geometric_series_factor(ratio, stretched_count)
-    actual_uniform_dz = height / (uniform_count + stretched_factor)
+    if domain_config.exact_vertical_inputs:
+        actual_uniform_dz = requested_uniform_dz
+        effective_height = requested_uniform_dz * (uniform_count + stretched_factor)
+    else:
+        actual_uniform_dz = height / (uniform_count + stretched_factor)
+        effective_height = height
     actual_transition = uniform_count * actual_uniform_dz
     actual_final_dz = actual_uniform_dz * ratio ** (stretched_count - 1)
     return {
@@ -1505,6 +1537,7 @@ def _solve_piecewise_grid(domain_config: DomainConfig) -> dict[str, Any]:
         "uniform_count": uniform_count,
         "stretched_count": stretched_count,
         "total_count": uniform_count + stretched_count,
+        "effective_height": effective_height,
     }
 
 

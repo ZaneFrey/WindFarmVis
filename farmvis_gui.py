@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import sys
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -360,6 +361,11 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.vertical_discretization.addItem("Hyperbolic tangent", "hyperbolic_tangent")
         self.vertical_discretization.addItem("Piecewise", "piecewise")
         layout.addWidget(self._form_row(("Vertical discretization", self.vertical_discretization)))
+        self.exact_vertical_inputs = QtWidgets.QCheckBox("Use exact vertical discretization inputs")
+        self.exact_vertical_inputs.setToolTip(
+            "Keep requested vertical spacings exact and snap L_z to the nearest compatible grid top."
+        )
+        layout.addWidget(self.exact_vertical_inputs)
 
         self.dz = self._float(10.0, minimum=0.001)
         self.initial_dz = self._float(10.0, minimum=0.001)
@@ -716,6 +722,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             dx=self.dx.value(), dy=self.dy.value(), dz=self.dz.value(),
             Nx=self.nx.value(), Ny=self.ny.value(), Nz=self.nz.value(),
             vertical_discretization=self.vertical_discretization.currentData(),
+            exact_vertical_inputs=self.exact_vertical_inputs.isChecked(),
             initial_dz=self.initial_dz.value(),
             stretching_ratio=(
                 self.stretching_ratio.value()
@@ -757,10 +764,19 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         clusters = [ClusterConfig(cluster_id=index, **self._editor_values(editor)) for index, editor in enumerate(self.cluster_editors, start=1)]
         return FarmStudyConfig(self.rotor_diameter.value(), self.hub_height.value(), clusters)
 
+    def _resolve_domain_height(self, domain: DomainConfig) -> tuple[DomainConfig, dict]:
+        metrics = compute_grid_metrics(domain)
+        if domain.exact_vertical_inputs:
+            resolved_height = metrics["domain_lengths"]["Lz"]
+            if not np.isclose(resolved_height, domain.Lz):
+                self.lz.setValue(resolved_height)
+                domain = replace(domain, Lz=resolved_height)
+        return domain, metrics
+
     def _compute_state(self) -> tuple[DomainConfig, FarmStudyConfig, dict, dict, dict, list[str]]:
         domain = self._build_domain_config()
         study = self._build_study_config()
-        metrics = compute_grid_metrics(domain)
+        domain, metrics = self._resolve_domain_height(domain)
         amr = compute_amr_metrics(domain, study.rotor_diameter, study.hub_height)
         layouts = generate_all_layouts(study, domain_config=domain)
         warnings = validate_configuration(domain, study, layouts) + amr["warnings"]
@@ -795,6 +811,8 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             ("Base d_x / d_y (m)", f"{spacing['dx']:.3f} / {spacing['dy']:.3f}"),
             ("Total cells", f"{total_cells:,}"), ("Cube-equivalent", f"~{total_cube:.3f}^3"), ("Total turbines", layouts["total_turbines"]),
         ]
+        if vertical["exact_inputs"]:
+            rows.insert(4, ("Requested L_z (m)", lengths["Lz_requested"]))
         if vertical["type"] == "uniform":
             rows.append(("d_z (m)", f"{vertical['actual_initial_dz']:.6f}"))
         elif vertical["type"] == "stretched":
@@ -974,7 +992,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
 
     def plot_vertical_grid(self) -> None:
         try:
-            domain = self._build_domain_config()
+            domain, _ = self._resolve_domain_height(self._build_domain_config())
             if self.vertical_grid_window is None:
                 self.vertical_grid_window = VerticalGridWindow()
             self.vertical_grid_window.update_profile(domain)
@@ -997,7 +1015,8 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         if output_path.suffix.lower() != ".txt":
             output_path = output_path.with_suffix(".txt")
         try:
-            saved = export_vertical_grid_levels(self._build_domain_config(), output_path)
+            domain, _ = self._resolve_domain_height(self._build_domain_config())
+            saved = export_vertical_grid_levels(domain, output_path)
             QtWidgets.QMessageBox.information(self, "Grid levels saved", f"Grid levels saved to:\n{saved}")
         except Exception as error:
             QtWidgets.QMessageBox.critical(self, "Grid level export failed", str(error))
@@ -1078,6 +1097,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.grid_mode.setCurrentIndex(0 if domain.grid_mode == "resolution" else 1)
         vertical_index = self.vertical_discretization.findData(domain.vertical_discretization)
         self.vertical_discretization.setCurrentIndex(max(0, vertical_index))
+        self.exact_vertical_inputs.setChecked(domain.exact_vertical_inputs)
         if domain.dx is not None: self.dx.setValue(domain.dx)
         if domain.dy is not None: self.dy.setValue(domain.dy)
         if domain.dz is not None: self.dz.setValue(domain.dz)

@@ -177,6 +177,12 @@ When a stretched grid is specified by its final spacing, FarmVis derives the geo
 
 Piecewise mode rounds the requested lower region to an integer number of uniform cells and derives the upper-region cell count. A common scale adjustment then makes the complete grid terminate exactly at `L_z` while keeping the first upper cell equal to the lower uniform spacing. The summary reports requested and actual `z_t`, lower and upper cell counts, actual endpoint spacing, and the solved ratio.
 
+#### Exact vertical inputs
+
+Enable **Use exact vertical discretization inputs** to reverse the usual adjustment. FarmVis keeps the requested vertical spacing inputs exact and snaps `L_z` to the nearest compatible grid-top height instead. The resolved height is written back to the `L_z` control and is used by the domain bounds, summaries, plots, validation, and saved grid levels.
+
+This applies to uniform resolution input, stretched endpoint or ratio input, hyperbolic-tangent resolution input, and piecewise input. For piecewise grids, the lower spacing remains exact and the actual transition height is the nearest whole-cell multiple of that spacing.
+
 The summary reports the requested and actual endpoint spacing, solved stretching ratio or factor, vertical cell count, and the nearest height corresponding to the requested spacing. AMR is limited to maximum level 0 whenever a non-uniform vertical discretization is selected.
 
 For the hyperbolic tangent grid, edge `k` is placed using:
