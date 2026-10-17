@@ -20,13 +20,13 @@ The application is intended for planning domain dimensions, numerical resolution
 
 ## Application Windows
 
-FarmVis opens three native windows:
+FarmVis provides three native windows:
 
 1. **Control panel** — organizes inputs into **Domain**, **Wind Farm**, **AMR**, and **Presets** tabs, with validation messages, summaries, and actions available below every tab.
 2. **3D domain view** — an interactive PyVista window for rotating, panning, and zooming around the domain.
 3. **2D views** — a tabbed window containing the `x-y`, `x-z`, and `y-z` projections.
 
-The visualization windows are created when the control panel starts and are updated in place. Closing or minimizing a visualization window does not discard the current inputs. Use **Show 3D Window** or **Show 2D Window** to bring it back.
+Only the control panel opens at startup. Click **Update Visualizations** to create, update, and show the 3D and 2D visualization windows. Closing or minimizing a visualization window does not discard the current inputs. Once the visualizations have been created, use **Show 3D Window** or **Show 2D Window** to bring one back.
 
 Use **Plot Vertical Grid** to open an interactive Matplotlib view of cell size `d_z` versus elevation `z`. Each vertical grid level is drawn behind the profile as a light-gray horizontal line. This plot is opened only on request and is not shown when FarmVis starts.
 
@@ -446,7 +446,7 @@ python -m py_compile farmvis_gui.py farmvis_tool.py
 
 Then launch the application and verify:
 
-- Control-panel startup
+- Control-panel-only startup (the 3D and 2D windows remain closed)
 - Dynamic cluster and AMR page creation
 - Preset save/load round trips
 - Coordinate export

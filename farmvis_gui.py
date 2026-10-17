@@ -288,7 +288,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.panel_splitter.setSizes([default_tab_height, self.output_panel.sizeHint().height()])
         self.panel_splitter.handle(1).setToolTip("Drag to resize the control tabs")
         self._refresh_preset_list()
-        self.update_visualization()
+        self._refresh_visualization(show_windows=False)
 
     def _control_tab(self, title: str) -> QtWidgets.QVBoxLayout:
         page = QtWidgets.QWidget()
@@ -876,14 +876,18 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         return "".join(blocks)
 
     def update_visualization(self) -> None:
+        self._refresh_visualization(show_windows=True)
+
+    def _refresh_visualization(self, show_windows: bool) -> None:
         try:
             domain, study, metrics, amr, layouts, warnings = self._compute_state()
             self.warning_box.setPlainText("\n".join(warnings) if warnings else "No validation warnings.")
             self.summary_box.setHtml(self._summary_html(domain, study, metrics, amr, layouts))
-            self._update_3d(domain, study, metrics, amr, layouts)
-            self.two_d_window.update_figures(domain, study, layouts, amr)
-            self.show_3d()
-            self.two_d_window.show()
+            if show_windows:
+                self._update_3d(domain, study, metrics, amr, layouts)
+                self.two_d_window.update_figures(domain, study, layouts, amr)
+                self.show_3d()
+                self.two_d_window.show()
         except Exception as error:
             traceback.print_exc()
             QtWidgets.QMessageBox.critical(self, "Update failed", str(error))
