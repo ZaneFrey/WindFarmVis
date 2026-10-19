@@ -517,7 +517,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         default_rotor_diameter, default_hub_height = self.turbine_preset.currentData()
         self.rotor_diameter = self._float(default_rotor_diameter, minimum=0.001, step=5.0)
         self.hub_height = self._float(default_hub_height, minimum=0.001, step=5.0)
-        self.cluster_count = self._int(1, minimum=1, maximum=20)
+        self.cluster_count = self._int(1, minimum=0, maximum=20)
         layout.addWidget(self._form_row(("Rotor D (m)", self.rotor_diameter), ("Hub height (m)", self.hub_height)))
         layout.addWidget(self._form_row(("# clusters", self.cluster_count), ("Preset", self.turbine_preset)))
         self.cluster_toolbox = QtWidgets.QToolBox()

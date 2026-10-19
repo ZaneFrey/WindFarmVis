@@ -871,24 +871,25 @@ def validate_configuration(
     if layouts is None:
         layouts = generate_all_layouts(study_config, domain_config=domain_config)
 
-    rotor_radius = 0.5 * study_config.rotor_diameter
-    rotor_top = study_config.hub_height + rotor_radius
-    rotor_bottom = study_config.hub_height - rotor_radius
+    if layouts["clusters"]:
+        rotor_radius = 0.5 * study_config.rotor_diameter
+        rotor_top = study_config.hub_height + rotor_radius
+        rotor_bottom = study_config.hub_height - rotor_radius
 
-    if rotor_top > domain_height:
-        warnings.append(
-            f"Rotor top at z={rotor_top:.3f} m exceeds the domain height L_z={domain_height:.3f} m."
-        )
-    if rotor_bottom < 0.0:
-        warnings.append(
-            f"Rotor bottom at z={rotor_bottom:.3f} m lies below the domain floor z=0.000 m."
-        )
+        if rotor_top > domain_height:
+            warnings.append(
+                f"Rotor top at z={rotor_top:.3f} m exceeds the domain height L_z={domain_height:.3f} m."
+            )
+        if rotor_bottom < 0.0:
+            warnings.append(
+                f"Rotor bottom at z={rotor_bottom:.3f} m lies below the domain floor z=0.000 m."
+            )
 
-    rayleigh_floor = domain_height - domain_config.rayleigh_depth
-    if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0 and rotor_top > rayleigh_floor:
-        warnings.append(
-            f"Rotor top at z={rotor_top:.3f} m intersects the Rayleigh damping region starting at z={rayleigh_floor:.3f} m."
-        )
+        rayleigh_floor = domain_height - domain_config.rayleigh_depth
+        if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0 and rotor_top > rayleigh_floor:
+            warnings.append(
+                f"Rotor top at z={rotor_top:.3f} m intersects the Rayleigh damping region starting at z={rayleigh_floor:.3f} m."
+            )
 
     for cluster in layouts["clusters"]:
         cluster_id = cluster["cluster_id"]
@@ -932,8 +933,8 @@ def validate_preset_payload(payload: dict[str, Any]) -> None:
     if missing_study:
         raise ValueError(f"Preset study section is missing required keys: {', '.join(missing_study)}")
 
-    if not isinstance(study_data["clusters"], list) or len(study_data["clusters"]) == 0:
-        raise ValueError("Preset study.clusters must be a non-empty list.")
+    if not isinstance(study_data["clusters"], list):
+        raise ValueError("Preset study.clusters must be a list.")
 
     if "amr_levels" in domain_data:
         if not isinstance(domain_data["amr_levels"], list):
