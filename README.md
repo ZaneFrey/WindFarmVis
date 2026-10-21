@@ -30,7 +30,7 @@ Only the control panel opens at startup. Click **Update Visualizations** to crea
 
 Use **Plot Vertical Grid** to open an interactive Matplotlib view of cell size `d_z` versus elevation `z`. Each vertical grid level is drawn behind the profile as a light-gray horizontal line. This plot is opened only on request and is not shown when FarmVis starts.
 
-Use **Save grid levels** to write every current vertical edge level, including `0` and `L_z`, to a `.txt` file as one comma-separated row.
+Use **Save grid levels** to write every current vertical edge level, including `0` and `L_z`, to a `.txt` file as one space-separated row.
 
 Drag the horizontal divider below the control tabs to make the tab area taller or shorter. The shared action buttons, domain and grid summary, and compact validation-warning pane remain available below the divider.
 
