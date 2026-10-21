@@ -163,8 +163,8 @@ The vertical grid can be configured independently of the horizontal input mode:
 
 - **Uniform** uses the existing `d_z` input in resolution mode or `N_z` in grid-count mode.
 - **Stretched** accepts an initial `d_z` plus either a stretching ratio such as `1.03` or a target final `d_z`. A selector determines which parameterization is active, so the ratio and final spacing cannot be entered together. In resolution mode, FarmVis chooses the integer `N_z` whose implied height is nearest to `L_z`; in grid-count mode, it uses the entered `N_z`.
-- **Hyperbolic tangent** uses a one-sided tanh mapping that concentrates cells near the ground and smoothly increases their height toward the domain top. It can be parameterized by either a stretching factor or a target final `d_z`, but never both. Resolution mode also accepts a target initial `d_z`; grid-count mode uses the entered `N_z`.
-- **Piecewise** uses a uniform lower region from the surface to a requested transition height `z_t`, followed by a geometrically stretched upper region. Enter the lower-region `d_z` and choose either a stretching ratio or a target final `d_z`. Piecewise mode derives its vertical cell count from these inputs, even when the horizontal grid uses grid-count mode.
+- **Hyperbolic tangent** evaluates a target cell-size function from a minimum `d_z`, maximum `d_z`, transition height, and transition width. The vertical cell count is derived from that profile in both horizontal grid-input modes.
+- **Piecewise** uses a uniform lower region from the surface to a requested transition height `z_t`. The upper region can use a geometric stretching ratio, a target final `d_z`, or a hyperbolic-tangent profile. Piecewise mode derives its vertical cell count from these inputs, even when the horizontal grid uses grid-count mode.
 
 For a stretched grid, the exact initial spacing is adjusted so the grid terminates at the prescribed domain height:
 
@@ -175,25 +175,26 @@ d_z(0) = L_z (r - 1) / (r^N_z - 1)
 
 When a stretched grid is specified by its final spacing, FarmVis derives the geometric ratio from the requested endpoints. The final grid is scaled to terminate exactly at `L_z`, and the summary distinguishes the requested endpoint spacings from their actual values.
 
-Piecewise mode rounds the requested lower region to an integer number of uniform cells and derives the upper-region cell count. A common scale adjustment then makes the complete grid terminate exactly at `L_z` while keeping the first upper cell equal to the lower uniform spacing. The summary reports requested and actual `z_t`, lower and upper cell counts, actual endpoint spacing, and the solved ratio.
+Piecewise mode rounds the requested lower region to an integer number of uniform cells and derives the upper-region cell count. A common scale adjustment then makes the complete grid terminate exactly at `L_z` while keeping the first upper cell equal to the lower uniform spacing. The summary reports requested and actual `z_t`, lower and upper cell counts, actual endpoint spacing, and the applicable stretching parameters.
+
+For the piecewise hyperbolic-tangent option, the lower-region spacing is also the tanh minimum spacing. The other inputs are maximum `d_z`, transition height above `z_t`, and transition width. The upper profile is normalized so its first cell exactly matches the uniform spacing at `z_t`, eliminating a spacing jump at the region boundary. The transition height is relative to the actual piecewise boundary rather than an absolute domain elevation.
 
 #### Exact vertical inputs
 
 Enable **Use exact vertical discretization inputs** to reverse the usual adjustment. FarmVis keeps the requested vertical spacing inputs exact and snaps `L_z` to the nearest compatible grid-top height instead. The resolved height is written back to the `L_z` control and is used by the domain bounds, summaries, plots, validation, and saved grid levels.
 
-This applies to uniform resolution input, stretched endpoint or ratio input, hyperbolic-tangent resolution input, and piecewise input. For piecewise grids, the lower spacing remains exact and the actual transition height is the nearest whole-cell multiple of that spacing.
+This applies to uniform resolution input, stretched endpoint or ratio input, hyperbolic-tangent input, and piecewise input. For piecewise grids, the lower spacing remains exact and the actual transition height is the nearest whole-cell multiple of that spacing.
 
-The summary reports the requested and actual endpoint spacing, solved stretching ratio or factor, vertical cell count, and the nearest height corresponding to the requested spacing. AMR is limited to maximum level 0 whenever a non-uniform vertical discretization is selected.
+The summary reports the requested profile parameters, actual endpoint spacing, vertical cell count, and other grid-specific values. AMR is limited to maximum level 0 whenever a non-uniform vertical discretization is selected.
 
-For the hyperbolic tangent grid, edge `k` is placed using:
+For the hyperbolic tangent grid, the target spacing at elevation `z` is:
 
 ```text
-eta_k = k / N_z
-G(eta) = eta + [ln(cosh(beta (eta - 1))) - ln(cosh(beta))] / beta
-z_k = L_z G(eta_k) / G(1)
+d_z(z) = d_z,min + 0.5 (d_z,max - d_z,min)
+         [1 + tanh((z - z_transition) / w_transition)]
 ```
 
-Here `beta` is the stretching factor. Larger values concentrate more cells near `z = 0`. This orientation makes cell spacing change slowly near the surface and increasingly rapidly toward the domain top. In resolution mode, FarmVis chooses the integer `N_z` whose first-cell height is nearest to the requested initial `d_z`. When final-spacing mode is selected, FarmVis solves `beta` from the requested endpoint relationship; with an explicit `N_z`, it solves `beta` so the final cell matches the requested value.
+Starting at the ground, FarmVis evaluates this function at each cell's lower edge and advances by the resulting target spacing. The transition height locates the midpoint between the minimum and maximum spacing, while the transition width controls how gradually the change occurs. By default, the generated profile is scaled slightly so its final edge lands exactly on `L_z`. With exact vertical inputs enabled, the target spacings are retained and `L_z` snaps to the nearest generated edge instead.
 
 ### Inflow region
 

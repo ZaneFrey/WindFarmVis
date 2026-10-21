@@ -384,23 +384,18 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.stretched_mode_row = self._form_row(("Specify stretching with", self.stretched_parameter_mode))
         self.stretched_ratio_row = self._form_row(("stretching ratio", self.stretching_ratio))
         self.stretched_final_row = self._form_row(("final d_z (m)", self.stretched_final_dz))
-        self.tanh_initial_dz = self._float(10.0, minimum=0.001)
-        self.tanh_stretching_factor = QtWidgets.QDoubleSpinBox()
-        self.tanh_stretching_factor.setRange(0.000001, 10.0)
-        self.tanh_stretching_factor.setDecimals(6)
-        self.tanh_stretching_factor.setSingleStep(0.1)
-        self.tanh_stretching_factor.setValue(2.0)
-        self.tanh_stretching_factor.setToolTip(
-            "Larger values concentrate more vertical cells near the ground."
+        self.tanh_dz_min = self._float(5.0, minimum=0.001)
+        self.tanh_dz_max = self._float(25.0, minimum=0.001)
+        self.tanh_transition_height = self._float(1588.0, minimum=0.0, step=50.0)
+        self.tanh_transition_width = self._float(500.0, minimum=0.001, step=25.0)
+        self.tanh_spacing_row = self._form_row(
+            ("minimum d_z (m)", self.tanh_dz_min),
+            ("maximum d_z (m)", self.tanh_dz_max),
         )
-        self.tanh_final_dz = self._float(50.0, minimum=0.001)
-        self.tanh_parameter_mode = QtWidgets.QComboBox()
-        self.tanh_parameter_mode.addItem("Stretching factor", "factor")
-        self.tanh_parameter_mode.addItem("Final d_z", "final_dz")
-        self.tanh_initial_row = self._form_row(("initial d_z (m)", self.tanh_initial_dz))
-        self.tanh_mode_row = self._form_row(("Specify stretching with", self.tanh_parameter_mode))
-        self.tanh_factor_row = self._form_row(("stretching factor", self.tanh_stretching_factor))
-        self.tanh_final_row = self._form_row(("final d_z (m)", self.tanh_final_dz))
+        self.tanh_transition_row = self._form_row(
+            ("transition height (m)", self.tanh_transition_height),
+            ("transition width (m)", self.tanh_transition_width),
+        )
         self.piecewise_uniform_dz = self._float(10.0, minimum=0.001)
         self.piecewise_transition_height = self._float(300.0, minimum=0.001, step=25.0)
         self.piecewise_stretching_ratio = QtWidgets.QDoubleSpinBox()
@@ -409,9 +404,16 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.piecewise_stretching_ratio.setSingleStep(0.01)
         self.piecewise_stretching_ratio.setValue(1.03)
         self.piecewise_final_dz = self._float(50.0, minimum=0.001)
+        self.piecewise_tanh_dz_max = self._float(25.0, minimum=0.001)
+        self.piecewise_tanh_dz_max.setToolTip(
+            "The tanh minimum d_z is locked to the uniform piecewise d_z."
+        )
+        self.piecewise_tanh_transition_height = self._float(500.0, minimum=0.0, step=25.0)
+        self.piecewise_tanh_transition_width = self._float(500.0, minimum=0.001, step=25.0)
         self.piecewise_parameter_mode = QtWidgets.QComboBox()
         self.piecewise_parameter_mode.addItem("Stretching ratio", "ratio")
         self.piecewise_parameter_mode.addItem("Final d_z", "final_dz")
+        self.piecewise_parameter_mode.addItem("Hyperbolic tangent", "hyperbolic_tangent")
         self.piecewise_base_row = self._form_row(
             ("uniform d_z (m)", self.piecewise_uniform_dz),
             ("z_t (m)", self.piecewise_transition_height),
@@ -423,24 +425,30 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             ("stretching ratio", self.piecewise_stretching_ratio)
         )
         self.piecewise_final_row = self._form_row(("final d_z (m)", self.piecewise_final_dz))
+        self.piecewise_tanh_spacing_row = self._form_row(
+            ("maximum d_z (m)", self.piecewise_tanh_dz_max)
+        )
+        self.piecewise_tanh_transition_row = self._form_row(
+            ("transition height above z_t (m)", self.piecewise_tanh_transition_height),
+            ("transition width (m)", self.piecewise_tanh_transition_width),
+        )
         layout.addWidget(self.uniform_dz_row)
         layout.addWidget(self.vertical_nz_row)
         layout.addWidget(self.stretched_initial_row)
         layout.addWidget(self.stretched_mode_row)
         layout.addWidget(self.stretched_ratio_row)
         layout.addWidget(self.stretched_final_row)
-        layout.addWidget(self.tanh_initial_row)
-        layout.addWidget(self.tanh_mode_row)
-        layout.addWidget(self.tanh_factor_row)
-        layout.addWidget(self.tanh_final_row)
+        layout.addWidget(self.tanh_spacing_row)
+        layout.addWidget(self.tanh_transition_row)
         layout.addWidget(self.piecewise_base_row)
         layout.addWidget(self.piecewise_mode_row)
         layout.addWidget(self.piecewise_ratio_row)
         layout.addWidget(self.piecewise_final_row)
+        layout.addWidget(self.piecewise_tanh_spacing_row)
+        layout.addWidget(self.piecewise_tanh_transition_row)
         self.grid_mode.currentIndexChanged.connect(self._update_vertical_controls)
         self.vertical_discretization.currentIndexChanged.connect(self._update_vertical_controls)
         self.stretched_parameter_mode.currentIndexChanged.connect(self._update_vertical_controls)
-        self.tanh_parameter_mode.currentIndexChanged.connect(self._update_vertical_controls)
         self.piecewise_parameter_mode.currentIndexChanged.connect(self._update_vertical_controls)
         self._update_vertical_controls()
 
@@ -468,7 +476,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         vertical_type = self.vertical_discretization.currentData()
         counts_mode = self.grid_mode.currentData() == "counts"
         self.uniform_dz_row.setVisible(vertical_type == "uniform" and not counts_mode)
-        self.vertical_nz_row.setVisible(counts_mode and vertical_type != "piecewise")
+        self.vertical_nz_row.setVisible(
+            counts_mode and vertical_type not in {"piecewise", "hyperbolic_tangent"}
+        )
         stretched = vertical_type == "stretched"
         self.stretched_initial_row.setVisible(stretched)
         self.stretched_mode_row.setVisible(stretched)
@@ -478,11 +488,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.stretched_final_row.setVisible(
             stretched and self.stretched_parameter_mode.currentData() == "final_dz"
         )
-        self.tanh_initial_row.setVisible(vertical_type == "hyperbolic_tangent" and not counts_mode)
         tanh = vertical_type == "hyperbolic_tangent"
-        self.tanh_mode_row.setVisible(tanh)
-        self.tanh_factor_row.setVisible(tanh and self.tanh_parameter_mode.currentData() == "factor")
-        self.tanh_final_row.setVisible(tanh and self.tanh_parameter_mode.currentData() == "final_dz")
+        self.tanh_spacing_row.setVisible(tanh)
+        self.tanh_transition_row.setVisible(tanh)
         piecewise = vertical_type == "piecewise"
         self.piecewise_base_row.setVisible(piecewise)
         self.piecewise_mode_row.setVisible(piecewise)
@@ -492,6 +500,11 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.piecewise_final_row.setVisible(
             piecewise and self.piecewise_parameter_mode.currentData() == "final_dz"
         )
+        piecewise_tanh = (
+            piecewise and self.piecewise_parameter_mode.currentData() == "hyperbolic_tangent"
+        )
+        self.piecewise_tanh_spacing_row.setVisible(piecewise_tanh)
+        self.piecewise_tanh_transition_row.setVisible(piecewise_tanh)
         self._update_amr_availability()
 
     def _update_amr_availability(self) -> None:
@@ -733,16 +746,10 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                 self.stretched_final_dz.value()
                 if self.stretched_parameter_mode.currentData() == "final_dz" else None
             ),
-            tanh_initial_dz=self.tanh_initial_dz.value(),
-            tanh_stretching_factor=(
-                self.tanh_stretching_factor.value()
-                if self.tanh_parameter_mode.currentData() == "factor" else None
-            ),
-            tanh_parameter_mode=self.tanh_parameter_mode.currentData(),
-            tanh_final_dz=(
-                self.tanh_final_dz.value()
-                if self.tanh_parameter_mode.currentData() == "final_dz" else None
-            ),
+            tanh_dz_min=self.tanh_dz_min.value(),
+            tanh_dz_max=self.tanh_dz_max.value(),
+            tanh_transition_height=self.tanh_transition_height.value(),
+            tanh_transition_width=self.tanh_transition_width.value(),
             piecewise_uniform_dz=self.piecewise_uniform_dz.value(),
             piecewise_transition_height=self.piecewise_transition_height.value(),
             piecewise_parameter_mode=self.piecewise_parameter_mode.currentData(),
@@ -754,6 +761,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                 self.piecewise_final_dz.value()
                 if self.piecewise_parameter_mode.currentData() == "final_dz" else None
             ),
+            piecewise_tanh_dz_max=self.piecewise_tanh_dz_max.value(),
+            piecewise_tanh_transition_height=self.piecewise_tanh_transition_height.value(),
+            piecewise_tanh_transition_width=self.piecewise_tanh_transition_width.value(),
             inflow_enabled=self.inflow_enabled.isChecked(), Lin=self.lin.value(),
             rayleigh_enabled=self.rayleigh_enabled.isChecked(), rayleigh_depth=self.rayleigh_depth.value(),
             max_level=self.max_level.value(),
@@ -828,33 +838,51 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                 ]
             )
         elif vertical["type"] == "piecewise":
+            piecewise_tanh = vertical["parameter_mode"] == "hyperbolic_tangent"
             rows.extend(
                 [
                     ("Requested uniform d_z (m)", f"{vertical['requested_initial_dz']:.6f}"),
                     ("Requested z_t (m)", f"{vertical['requested_transition_height']:.6f}"),
                 ]
             )
-            if vertical["requested_final_dz"] is not None:
+            if piecewise_tanh:
+                rows.extend(
+                    [
+                        ("Tanh maximum d_z (m)", f"{vertical['piecewise_tanh_dz_max']:.6f}"),
+                        (
+                            "Tanh transition height above z_t (m)",
+                            f"{vertical['piecewise_tanh_transition_height']:.6f}",
+                        ),
+                        (
+                            "Tanh transition width (m)",
+                            f"{vertical['piecewise_tanh_transition_width']:.6f}",
+                        ),
+                    ]
+                )
+            elif vertical["requested_final_dz"] is not None:
                 rows.append(("Requested final d_z (m)", f"{vertical['requested_final_dz']:.6f}"))
             rows.extend(
                 [
                     ("Actual uniform d_z (m)", f"{vertical['actual_initial_dz']:.6f}"),
                     ("Actual z_t (m)", f"{vertical['actual_transition_height']:.6f}"),
                     ("Actual final d_z (m)", f"{vertical['final_dz']:.6f}"),
-                    ("Stretching ratio", f"{vertical['stretching_ratio']:.6f}"),
-                    ("Uniform / stretched cells", f"{vertical['uniform_cell_count']} / {vertical['stretched_cell_count']}"),
+                    ("Uniform / upper cells", f"{vertical['uniform_cell_count']} / {vertical['stretched_cell_count']}"),
                 ]
             )
+            if piecewise_tanh:
+                rows.append(("Grid scale factor", f"{vertical['piecewise_scale_factor']:.9f}"))
+            else:
+                rows.append(("Stretching ratio", f"{vertical['stretching_ratio']:.6f}"))
         else:
-            if vertical["requested_initial_dz"] is not None:
-                rows.append(("Requested initial d_z (m)", f"{vertical['requested_initial_dz']:.6f}"))
-            if vertical["requested_final_dz"] is not None:
-                rows.append(("Requested final d_z (m)", f"{vertical['requested_final_dz']:.6f}"))
             rows.extend(
                 [
+                    ("Target minimum d_z (m)", f"{vertical['tanh_dz_min']:.6f}"),
+                    ("Target maximum d_z (m)", f"{vertical['tanh_dz_max']:.6f}"),
+                    ("Transition height (m)", f"{vertical['tanh_transition_height']:.6f}"),
+                    ("Transition width (m)", f"{vertical['tanh_transition_width']:.6f}"),
                     ("Actual initial d_z (m)", f"{vertical['actual_initial_dz']:.6f}"),
                     ("Final d_z (m)", f"{vertical['final_dz']:.6f}"),
-                    ("Tanh stretching factor", f"{vertical['tanh_stretching_factor']:.6f}"),
+                    ("Grid scale factor", f"{vertical['tanh_scale_factor']:.9f}"),
                 ]
             )
         def table(title: str, pairs: list[tuple[str, object]]) -> str:
@@ -1114,12 +1142,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.stretched_parameter_mode.setCurrentIndex(max(0, stretched_mode_index))
         if domain.stretched_final_dz is not None:
             self.stretched_final_dz.setValue(domain.stretched_final_dz)
-        if domain.tanh_initial_dz is not None: self.tanh_initial_dz.setValue(domain.tanh_initial_dz)
-        if domain.tanh_stretching_factor is not None:
-            self.tanh_stretching_factor.setValue(domain.tanh_stretching_factor)
-        tanh_mode_index = self.tanh_parameter_mode.findData(domain.tanh_parameter_mode)
-        self.tanh_parameter_mode.setCurrentIndex(max(0, tanh_mode_index))
-        if domain.tanh_final_dz is not None: self.tanh_final_dz.setValue(domain.tanh_final_dz)
+        if domain.tanh_dz_min is not None: self.tanh_dz_min.setValue(domain.tanh_dz_min)
+        if domain.tanh_dz_max is not None: self.tanh_dz_max.setValue(domain.tanh_dz_max)
+        if domain.tanh_transition_height is not None:
+            self.tanh_transition_height.setValue(domain.tanh_transition_height)
+        if domain.tanh_transition_width is not None:
+            self.tanh_transition_width.setValue(domain.tanh_transition_width)
         if domain.piecewise_uniform_dz is not None:
             self.piecewise_uniform_dz.setValue(domain.piecewise_uniform_dz)
         if domain.piecewise_transition_height is not None:
@@ -1130,6 +1158,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             self.piecewise_stretching_ratio.setValue(domain.piecewise_stretching_ratio)
         if domain.piecewise_final_dz is not None:
             self.piecewise_final_dz.setValue(domain.piecewise_final_dz)
+        self.piecewise_tanh_dz_max.setValue(domain.piecewise_tanh_dz_max)
+        self.piecewise_tanh_transition_height.setValue(domain.piecewise_tanh_transition_height)
+        self.piecewise_tanh_transition_width.setValue(domain.piecewise_tanh_transition_width)
         self.inflow_enabled.setChecked(domain.inflow_enabled); self.lin.setValue(domain.Lin)
         self.rayleigh_enabled.setChecked(domain.rayleigh_enabled); self.rayleigh_depth.setValue(domain.rayleigh_depth)
         self.max_level.setValue(domain.max_level if domain.vertical_discretization == "uniform" else 0)

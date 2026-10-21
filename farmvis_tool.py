@@ -30,15 +30,18 @@ class DomainConfig:
     stretching_ratio: float | None = None
     stretched_parameter_mode: str = "ratio"
     stretched_final_dz: float | None = None
-    tanh_initial_dz: float | None = None
-    tanh_stretching_factor: float | None = None
-    tanh_parameter_mode: str = "factor"
-    tanh_final_dz: float | None = None
+    tanh_dz_min: float = 5.0
+    tanh_dz_max: float = 25.0
+    tanh_transition_height: float = 1588.0
+    tanh_transition_width: float = 500.0
     piecewise_uniform_dz: float | None = None
     piecewise_transition_height: float | None = None
     piecewise_parameter_mode: str = "ratio"
     piecewise_stretching_ratio: float | None = None
     piecewise_final_dz: float | None = None
+    piecewise_tanh_dz_max: float = 25.0
+    piecewise_tanh_transition_height: float = 500.0
+    piecewise_tanh_transition_width: float = 500.0
     inflow_enabled: bool = False
     Lin: float = 0.0
     rayleigh_enabled: bool = False
@@ -111,24 +114,18 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             "vertical_discretization must be 'uniform', 'stretched', 'hyperbolic_tangent', or 'piecewise'"
         )
     stretched_mode = domain_config.stretched_parameter_mode.strip().lower()
-    tanh_mode = domain_config.tanh_parameter_mode.strip().lower()
     piecewise_mode = domain_config.piecewise_parameter_mode.strip().lower()
     if stretched_mode not in {"ratio", "final_dz"}:
         raise ValueError("stretched_parameter_mode must be 'ratio' or 'final_dz'")
-    if tanh_mode not in {"factor", "final_dz"}:
-        raise ValueError("tanh_parameter_mode must be 'factor' or 'final_dz'")
-    if piecewise_mode not in {"ratio", "final_dz"}:
-        raise ValueError("piecewise_parameter_mode must be 'ratio' or 'final_dz'")
+    if piecewise_mode not in {"ratio", "final_dz", "hyperbolic_tangent"}:
+        raise ValueError(
+            "piecewise_parameter_mode must be 'ratio', 'final_dz', or 'hyperbolic_tangent'"
+        )
     if vertical_type == "stretched":
         if stretched_mode == "ratio" and domain_config.stretched_final_dz is not None:
             raise ValueError("Provide either stretching_ratio or stretched_final_dz, not both")
         if stretched_mode == "final_dz" and domain_config.stretching_ratio is not None:
             raise ValueError("Provide either stretching_ratio or stretched_final_dz, not both")
-    if vertical_type == "hyperbolic_tangent":
-        if tanh_mode == "factor" and domain_config.tanh_final_dz is not None:
-            raise ValueError("Provide either tanh_stretching_factor or tanh_final_dz, not both")
-        if tanh_mode == "final_dz" and domain_config.tanh_stretching_factor is not None:
-            raise ValueError("Provide either tanh_stretching_factor or tanh_final_dz, not both")
     if vertical_type == "piecewise":
         if piecewise_mode == "ratio" and domain_config.piecewise_final_dz is not None:
             raise ValueError("Provide either piecewise_stretching_ratio or piecewise_final_dz, not both")
@@ -166,18 +163,8 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                     total_lengths["z"], requested_initial_dz, requested_final_dz
                 )
         elif vertical_type == "hyperbolic_tangent":
-            requested_initial_dz = _require_value(domain_config.tanh_initial_dz, "tanh_initial_dz")
-            _ensure_positive(requested_initial_dz, "tanh_initial_dz")
-            if tanh_mode == "factor":
-                tanh_factor = _require_value(domain_config.tanh_stretching_factor, "tanh_stretching_factor")
-                _ensure_positive(tanh_factor, "tanh_stretching_factor")
-                counts["z"] = _nearest_tanh_count(total_lengths["z"], requested_initial_dz, tanh_factor)
-            else:
-                requested_final_dz = _require_value(domain_config.tanh_final_dz, "tanh_final_dz")
-                _ensure_larger_final_spacing(requested_initial_dz, requested_final_dz, "tanh_final_dz")
-                counts["z"], tanh_factor = _solve_tanh_resolution_endpoints(
-                    total_lengths["z"], requested_initial_dz, requested_final_dz
-                )
+            tanh_grid = _solve_tanh_target_grid(domain_config)
+            counts["z"] = tanh_grid["total_count"]
         else:
             piecewise = _solve_piecewise_grid(domain_config)
             counts["z"] = piecewise["total_count"]
@@ -186,7 +173,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             "x": int(_require_value(domain_config.Nx, "Nx")),
             "y": int(_require_value(domain_config.Ny, "Ny")),
             "z": (
-                1 if vertical_type == "piecewise"
+                1 if vertical_type in {"piecewise", "hyperbolic_tangent"}
                 else int(_require_value(domain_config.Nz, "Nz"))
             ),
         }
@@ -208,7 +195,6 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
         actual_initial_dz = piecewise["actual_uniform_dz"]
         final_dz = piecewise["actual_final_dz"]
         stretching_ratio = piecewise["stretching_ratio"]
-        tanh_factor = None
         nearest_height = None
         spacing["z"] = actual_initial_dz
         effective_height = piecewise["effective_height"]
@@ -235,32 +221,14 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
         nearest_height = requested_initial_dz * series_factor
         final_dz = actual_initial_dz * stretching_ratio ** (counts["z"] - 1)
         spacing["z"] = actual_initial_dz
-        tanh_factor = None
     elif vertical_type == "hyperbolic_tangent":
-        if grid_mode == "resolution":
-            requested_initial_dz = _require_value(domain_config.tanh_initial_dz, "tanh_initial_dz")
-        else:
-            requested_initial_dz = None
-        if tanh_mode == "factor":
-            tanh_factor = _require_value(domain_config.tanh_stretching_factor, "tanh_stretching_factor")
-            _ensure_positive(tanh_factor, "tanh_stretching_factor")
-            requested_final_dz = None
-        else:
-            requested_final_dz = _require_value(domain_config.tanh_final_dz, "tanh_final_dz")
-            _ensure_positive(requested_final_dz, "tanh_final_dz")
-            if grid_mode == "counts":
-                tanh_factor = _solve_tanh_factor_for_final(
-                    total_lengths["z"], counts["z"], requested_final_dz
-                )
-        if domain_config.exact_vertical_inputs and requested_initial_dz is not None:
-            initial_fraction = _tanh_cell_size(1.0, tanh_factor, counts["z"], 0)
-            effective_height = requested_initial_dz / initial_fraction
-        actual_initial_dz = _tanh_cell_size(effective_height, tanh_factor, counts["z"], 0)
-        final_dz = _tanh_cell_size(effective_height, tanh_factor, counts["z"], counts["z"] - 1)
-        if actual_initial_dz <= 0.0:
-            raise ValueError(
-                "tanh_stretching_factor and N_z produce an initial cell smaller than numerical precision"
-            )
+        tanh_grid = _solve_tanh_target_grid(domain_config)
+        counts["z"] = tanh_grid["total_count"]
+        requested_initial_dz = tanh_grid["requested_dz_min"]
+        requested_final_dz = tanh_grid["requested_dz_max"]
+        actual_initial_dz = tanh_grid["cell_sizes"][0]
+        final_dz = tanh_grid["cell_sizes"][-1]
+        effective_height = tanh_grid["effective_height"]
         stretching_ratio = None
         nearest_height = None
         spacing["z"] = actual_initial_dz
@@ -268,7 +236,6 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
         requested_initial_dz = spacing["z"]
         requested_final_dz = spacing["z"]
         stretching_ratio = 1.0
-        tanh_factor = None
         if domain_config.exact_vertical_inputs and grid_mode == "resolution":
             actual_initial_dz = _require_value(domain_config.dz, "dz")
             effective_height = counts["z"] * actual_initial_dz
@@ -317,7 +284,21 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             "actual_initial_dz": actual_initial_dz,
             "final_dz": final_dz,
             "stretching_ratio": stretching_ratio,
-            "tanh_stretching_factor": tanh_factor,
+            "tanh_dz_min": (
+                tanh_grid["requested_dz_min"] if vertical_type == "hyperbolic_tangent" else None
+            ),
+            "tanh_dz_max": (
+                tanh_grid["requested_dz_max"] if vertical_type == "hyperbolic_tangent" else None
+            ),
+            "tanh_transition_height": (
+                tanh_grid["transition_height"] if vertical_type == "hyperbolic_tangent" else None
+            ),
+            "tanh_transition_width": (
+                tanh_grid["transition_width"] if vertical_type == "hyperbolic_tangent" else None
+            ),
+            "tanh_scale_factor": (
+                tanh_grid["scale_factor"] if vertical_type == "hyperbolic_tangent" else None
+            ),
             "nearest_height": nearest_height,
             "requested_transition_height": (
                 piecewise["requested_transition_height"] if vertical_type == "piecewise" else None
@@ -327,9 +308,21 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             ),
             "uniform_cell_count": piecewise["uniform_count"] if vertical_type == "piecewise" else None,
             "stretched_cell_count": piecewise["stretched_count"] if vertical_type == "piecewise" else None,
+            "piecewise_tanh_dz_max": (
+                piecewise["tanh_dz_max"] if vertical_type == "piecewise" else None
+            ),
+            "piecewise_tanh_transition_height": (
+                piecewise["tanh_transition_height"] if vertical_type == "piecewise" else None
+            ),
+            "piecewise_tanh_transition_width": (
+                piecewise["tanh_transition_width"] if vertical_type == "piecewise" else None
+            ),
+            "piecewise_scale_factor": (
+                piecewise["scale_factor"] if vertical_type == "piecewise" else None
+            ),
             "parameter_mode": (
                 stretched_mode if vertical_type == "stretched"
-                else tanh_mode if vertical_type == "hyperbolic_tangent"
+                else "target_dz" if vertical_type == "hyperbolic_tangent"
                 else piecewise_mode if vertical_type == "piecewise"
                 else "uniform"
             ),
@@ -347,24 +340,13 @@ def compute_vertical_grid_profile(domain_config: DomainConfig) -> dict[str, Any]
     count = metrics["counts"]["Nz"]
     height = metrics["domain_lengths"]["Lz"]
     if vertical["type"] == "piecewise":
-        uniform_count = vertical["uniform_cell_count"]
-        stretched_count = vertical["stretched_cell_count"]
-        uniform_sizes = np.full(uniform_count, vertical["actual_initial_dz"], dtype=float)
-        stretched_sizes = vertical["actual_initial_dz"] * vertical["stretching_ratio"] ** np.arange(
-            stretched_count, dtype=float
-        )
-        cell_sizes = np.concatenate((uniform_sizes, stretched_sizes))
-        z_levels = np.concatenate(([0.0], np.cumsum(cell_sizes)))
+        piecewise = _solve_piecewise_grid(domain_config)
+        cell_sizes = piecewise["cell_sizes"].copy()
+        z_levels = piecewise["z_levels"].copy()
     elif vertical["type"] == "hyperbolic_tangent":
-        eta = np.linspace(0.0, 1.0, count + 1)
-        factor = vertical["tanh_stretching_factor"]
-        log_cosh_factor = np.log(np.cosh(factor))
-        normalization = 1.0 - log_cosh_factor / factor
-        z_levels = height * (
-            eta
-            + (np.log(np.cosh(factor * (eta - 1.0))) - log_cosh_factor) / factor
-        ) / normalization
-        cell_sizes = np.diff(z_levels)
+        tanh_grid = _solve_tanh_target_grid(domain_config)
+        z_levels = tanh_grid["z_levels"].copy()
+        cell_sizes = tanh_grid["cell_sizes"].copy()
     else:
         indices = np.arange(count, dtype=float)
         cell_sizes = vertical["actual_initial_dz"] * vertical["stretching_ratio"] ** indices
@@ -381,11 +363,11 @@ def compute_vertical_grid_profile(domain_config: DomainConfig) -> dict[str, Any]
 
 
 def export_vertical_grid_levels(domain_config: DomainConfig, path: str | Path) -> Path:
-    """Write all vertical edge levels as one comma-separated row."""
+    """Write all vertical edge levels as one space-separated row."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     levels = compute_vertical_grid_profile(domain_config)["z_levels"]
-    target.write_text(",".join(f"{level:.6f}" for level in levels) + "\n", encoding="utf-8")
+    target.write_text(" ".join(f"{level:.6f}" for level in levels) + "\n", encoding="utf-8")
     return target
 
 
@@ -676,15 +658,18 @@ def serialize_configs(
             "stretching_ratio": domain_config.stretching_ratio,
             "stretched_parameter_mode": domain_config.stretched_parameter_mode,
             "stretched_final_dz": domain_config.stretched_final_dz,
-            "tanh_initial_dz": domain_config.tanh_initial_dz,
-            "tanh_stretching_factor": domain_config.tanh_stretching_factor,
-            "tanh_parameter_mode": domain_config.tanh_parameter_mode,
-            "tanh_final_dz": domain_config.tanh_final_dz,
+            "tanh_dz_min": domain_config.tanh_dz_min,
+            "tanh_dz_max": domain_config.tanh_dz_max,
+            "tanh_transition_height": domain_config.tanh_transition_height,
+            "tanh_transition_width": domain_config.tanh_transition_width,
             "piecewise_uniform_dz": domain_config.piecewise_uniform_dz,
             "piecewise_transition_height": domain_config.piecewise_transition_height,
             "piecewise_parameter_mode": domain_config.piecewise_parameter_mode,
             "piecewise_stretching_ratio": domain_config.piecewise_stretching_ratio,
             "piecewise_final_dz": domain_config.piecewise_final_dz,
+            "piecewise_tanh_dz_max": domain_config.piecewise_tanh_dz_max,
+            "piecewise_tanh_transition_height": domain_config.piecewise_tanh_transition_height,
+            "piecewise_tanh_transition_width": domain_config.piecewise_tanh_transition_width,
             "inflow_enabled": domain_config.inflow_enabled,
             "Lin": domain_config.Lin,
             "rayleigh_enabled": domain_config.rayleigh_enabled,
@@ -796,15 +781,34 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         stretching_ratio=_optional_float(domain_data.get("stretching_ratio")),
         stretched_parameter_mode=str(domain_data.get("stretched_parameter_mode", "ratio")),
         stretched_final_dz=_optional_float(domain_data.get("stretched_final_dz")),
-        tanh_initial_dz=_optional_float(domain_data.get("tanh_initial_dz")),
-        tanh_stretching_factor=_optional_float(domain_data.get("tanh_stretching_factor")),
-        tanh_parameter_mode=str(domain_data.get("tanh_parameter_mode", "factor")),
-        tanh_final_dz=_optional_float(domain_data.get("tanh_final_dz")),
+        tanh_dz_min=(
+            _optional_float(domain_data.get("tanh_dz_min"))
+            if domain_data.get("tanh_dz_min") is not None else 5.0
+        ),
+        tanh_dz_max=(
+            _optional_float(domain_data.get("tanh_dz_max"))
+            if domain_data.get("tanh_dz_max") is not None else 25.0
+        ),
+        tanh_transition_height=(
+            _optional_float(domain_data.get("tanh_transition_height"))
+            if domain_data.get("tanh_transition_height") is not None else 1588.0
+        ),
+        tanh_transition_width=(
+            _optional_float(domain_data.get("tanh_transition_width"))
+            if domain_data.get("tanh_transition_width") is not None else 500.0
+        ),
         piecewise_uniform_dz=_optional_float(domain_data.get("piecewise_uniform_dz")),
         piecewise_transition_height=_optional_float(domain_data.get("piecewise_transition_height")),
         piecewise_parameter_mode=str(domain_data.get("piecewise_parameter_mode", "ratio")),
         piecewise_stretching_ratio=_optional_float(domain_data.get("piecewise_stretching_ratio")),
         piecewise_final_dz=_optional_float(domain_data.get("piecewise_final_dz")),
+        piecewise_tanh_dz_max=float(domain_data.get("piecewise_tanh_dz_max", 25.0)),
+        piecewise_tanh_transition_height=float(
+            domain_data.get("piecewise_tanh_transition_height", 500.0)
+        ),
+        piecewise_tanh_transition_width=float(
+            domain_data.get("piecewise_tanh_transition_width", 500.0)
+        ),
         inflow_enabled=bool(domain_data.get("inflow_enabled", False)),
         Lin=float(domain_data.get("Lin", 0.0)),
         rayleigh_enabled=bool(domain_data.get("rayleigh_enabled", False)),
@@ -1506,7 +1510,7 @@ def _solve_piecewise_grid(domain_config: DomainConfig) -> dict[str, Any]:
         stretched_count = _nearest_stretched_count(
             requested_upper_height, requested_uniform_dz, ratio
         )
-    else:
+    elif mode == "final_dz":
         requested_final_dz = _require_value(domain_config.piecewise_final_dz, "piecewise_final_dz")
         _ensure_larger_final_spacing(
             requested_uniform_dz, requested_final_dz, "piecewise_final_dz"
@@ -1517,16 +1521,71 @@ def _solve_piecewise_grid(domain_config: DomainConfig) -> dict[str, Any]:
         ratio = _stretched_ratio_from_endpoints(
             requested_uniform_dz, requested_final_dz, stretched_count
         )
-
-    stretched_factor = _geometric_series_factor(ratio, stretched_count)
-    if domain_config.exact_vertical_inputs:
-        actual_uniform_dz = requested_uniform_dz
-        effective_height = requested_uniform_dz * (uniform_count + stretched_factor)
+    elif mode == "hyperbolic_tangent":
+        requested_final_dz = float(
+            _require_value(domain_config.piecewise_tanh_dz_max, "piecewise_tanh_dz_max")
+        )
+        tanh_transition_height = float(
+            _require_value(
+                domain_config.piecewise_tanh_transition_height,
+                "piecewise_tanh_transition_height",
+            )
+        )
+        tanh_transition_width = float(
+            _require_value(
+                domain_config.piecewise_tanh_transition_width,
+                "piecewise_tanh_transition_width",
+            )
+        )
+        _ensure_larger_final_spacing(
+            requested_uniform_dz, requested_final_dz, "piecewise_tanh_dz_max"
+        )
+        _ensure_nonnegative(tanh_transition_height, "piecewise_tanh_transition_height")
+        _ensure_positive(tanh_transition_width, "piecewise_tanh_transition_width")
+        ratio = None
+        upper_sizes = _piecewise_tanh_upper_sizes(
+            height,
+            requested_lower_height,
+            requested_uniform_dz,
+            requested_final_dz,
+            tanh_transition_height,
+            tanh_transition_width,
+            domain_config.exact_vertical_inputs,
+        )
+        stretched_count = len(upper_sizes)
     else:
-        actual_uniform_dz = height / (uniform_count + stretched_factor)
-        effective_height = height
+        raise ValueError(
+            "piecewise_parameter_mode must be 'ratio', 'final_dz', or 'hyperbolic_tangent'"
+        )
+
+    if mode == "hyperbolic_tangent":
+        unscaled_sizes = np.concatenate(
+            (np.full(uniform_count, requested_uniform_dz, dtype=float), upper_sizes)
+        )
+        unscaled_height = float(np.sum(unscaled_sizes))
+        scale_factor = 1.0 if domain_config.exact_vertical_inputs else height / unscaled_height
+        cell_sizes = unscaled_sizes * scale_factor
+        effective_height = unscaled_height if domain_config.exact_vertical_inputs else height
+        actual_uniform_dz = requested_uniform_dz * scale_factor
+        actual_final_dz = float(cell_sizes[-1])
+    else:
+        stretched_factor = _geometric_series_factor(ratio, stretched_count)
+        if domain_config.exact_vertical_inputs:
+            actual_uniform_dz = requested_uniform_dz
+            effective_height = requested_uniform_dz * (uniform_count + stretched_factor)
+        else:
+            actual_uniform_dz = height / (uniform_count + stretched_factor)
+            effective_height = height
+        scale_factor = actual_uniform_dz / requested_uniform_dz
+        upper_sizes = actual_uniform_dz * ratio ** np.arange(stretched_count, dtype=float)
+        cell_sizes = np.concatenate(
+            (np.full(uniform_count, actual_uniform_dz, dtype=float), upper_sizes)
+        )
+        actual_final_dz = float(upper_sizes[-1])
+
     actual_transition = uniform_count * actual_uniform_dz
-    actual_final_dz = actual_uniform_dz * ratio ** (stretched_count - 1)
+    z_levels = np.concatenate(([0.0], np.cumsum(cell_sizes)))
+    z_levels[-1] = effective_height
     return {
         "requested_uniform_dz": requested_uniform_dz,
         "requested_final_dz": requested_final_dz,
@@ -1535,107 +1594,118 @@ def _solve_piecewise_grid(domain_config: DomainConfig) -> dict[str, Any]:
         "actual_final_dz": actual_final_dz,
         "actual_transition_height": actual_transition,
         "stretching_ratio": ratio,
+        "tanh_dz_max": requested_final_dz if mode == "hyperbolic_tangent" else None,
+        "tanh_transition_height": (
+            tanh_transition_height if mode == "hyperbolic_tangent" else None
+        ),
+        "tanh_transition_width": (
+            tanh_transition_width if mode == "hyperbolic_tangent" else None
+        ),
+        "scale_factor": scale_factor,
         "uniform_count": uniform_count,
         "stretched_count": stretched_count,
         "total_count": uniform_count + stretched_count,
         "effective_height": effective_height,
+        "cell_sizes": cell_sizes,
+        "z_levels": z_levels,
     }
 
 
-def _tanh_level(height: float, factor: float, count: int, level_index: int) -> float:
-    eta = level_index / count
-    log_cosh_factor = math.log(math.cosh(factor))
-    normalization = 1.0 - log_cosh_factor / factor
-    return height * (
-        eta
-        + (math.log(math.cosh(factor * (eta - 1.0))) - log_cosh_factor) / factor
-    ) / normalization
+def _piecewise_tanh_upper_sizes(
+    height: float,
+    lower_height: float,
+    dz_min: float,
+    dz_max: float,
+    transition_height: float,
+    transition_width: float,
+    exact_inputs: bool,
+) -> np.ndarray:
+    """Build a tanh upper region whose first cell exactly matches the lower region."""
+    start_tanh = math.tanh(-transition_height / transition_width)
+    normalization = 1.0 - start_tanh
+    sizes: list[float] = []
+    local_height = 0.0
+    target_upper_height = height - lower_height
+    while True:
+        blend = (
+            math.tanh((local_height - transition_height) / transition_width) - start_tanh
+        ) / normalization
+        target_dz = dz_min + (dz_max - dz_min) * blend
+        next_height = local_height + target_dz
+        if next_height >= target_upper_height:
+            if exact_inputs:
+                if sizes and target_upper_height - local_height <= next_height - target_upper_height:
+                    pass
+                else:
+                    sizes.append(target_dz)
+            else:
+                sizes.append(target_dz)
+            break
+        sizes.append(target_dz)
+        local_height = next_height
+        if len(sizes) > 10_000_000:
+            raise ValueError("Piecewise tanh parameters produce more than 10,000,000 upper cells")
+    if not sizes:
+        raise ValueError("The piecewise tanh region must contain at least one cell")
+    return np.asarray(sizes, dtype=float)
 
 
-def _tanh_cell_size(height: float, factor: float, count: int, cell_index: int) -> float:
-    return _tanh_level(height, factor, count, cell_index + 1) - _tanh_level(
-        height, factor, count, cell_index
+def _solve_tanh_target_grid(domain_config: DomainConfig) -> dict[str, Any]:
+    """Generate cells by evaluating the requested target d_z at each lower edge."""
+    height = domain_config.Lz
+    dz_min = float(_require_value(domain_config.tanh_dz_min, "tanh_dz_min"))
+    dz_max = float(_require_value(domain_config.tanh_dz_max, "tanh_dz_max"))
+    transition_height = float(
+        _require_value(domain_config.tanh_transition_height, "tanh_transition_height")
     )
-
-
-def _nearest_tanh_count(height: float, initial_dz: float, factor: float) -> int:
-    """Choose N_z whose one-sided tanh grid has the nearest initial cell size."""
-    if initial_dz >= height:
-        return 1
-    lower, upper = 1, 10_000_000
-    while lower < upper:
-        middle = (lower + upper) // 2
-        if _tanh_cell_size(height, factor, middle, 0) > initial_dz:
-            lower = middle + 1
-        else:
-            upper = middle
-    candidates = {lower, max(1, lower - 1)}
-    return min(
-        candidates,
-        key=lambda count: abs(_tanh_cell_size(height, factor, count, 0) - initial_dz),
+    transition_width = float(
+        _require_value(domain_config.tanh_transition_width, "tanh_transition_width")
     )
+    _ensure_positive(dz_min, "tanh_dz_min")
+    _ensure_positive(dz_max, "tanh_dz_max")
+    _ensure_positive(transition_width, "tanh_transition_width")
+    _ensure_nonnegative(transition_height, "tanh_transition_height")
+    if dz_max < dz_min:
+        raise ValueError("tanh_dz_max must be greater than or equal to tanh_dz_min")
 
+    levels = [0.0]
+    while True:
+        z = levels[-1]
+        target_dz = dz_min + 0.5 * (dz_max - dz_min) * (
+            1.0 + math.tanh((z - transition_height) / transition_width)
+        )
+        next_z = z + target_dz
+        if next_z >= height:
+            if domain_config.exact_vertical_inputs:
+                if z > 0.0 and height - z <= next_z - height:
+                    effective_height = z
+                else:
+                    levels.append(next_z)
+                    effective_height = next_z
+                scale_factor = 1.0
+            else:
+                levels.append(next_z)
+                scale_factor = height / next_z
+                levels = [level * scale_factor for level in levels]
+                effective_height = height
+            break
+        levels.append(next_z)
+        if len(levels) > 10_000_001:
+            raise ValueError("Hyperbolic-tangent parameters produce more than 10,000,000 vertical cells")
 
-def _tanh_endpoint_ratio(height: float, factor: float, count: int) -> float:
-    initial = _tanh_cell_size(height, factor, count, 0)
-    if initial <= 0.0:
-        return math.inf
-    return _tanh_cell_size(height, factor, count, count - 1) / initial
-
-
-def _solve_tanh_factor_for_ratio(height: float, count: int, target_ratio: float) -> float:
-    lower, upper = 1e-6, 10.0
-    if _tanh_endpoint_ratio(height, upper, count) < target_ratio:
-        raise ValueError("Requested final/initial d_z ratio requires a tanh stretching factor above 10")
-    for _ in range(80):
-        middle = 0.5 * (lower + upper)
-        if _tanh_endpoint_ratio(height, middle, count) < target_ratio:
-            lower = middle
-        else:
-            upper = middle
-    return 0.5 * (lower + upper)
-
-
-def _solve_tanh_factor_for_final(height: float, count: int, final_dz: float) -> float:
-    uniform_dz = height / count
-    if final_dz <= uniform_dz:
-        raise ValueError("tanh_final_dz must be greater than the uniform spacing L_z / N_z")
-    if final_dz >= height:
-        raise ValueError("tanh_final_dz must be smaller than L_z")
-    lower, upper = 1e-6, 10.0
-    if _tanh_cell_size(height, upper, count, count - 1) < final_dz:
-        raise ValueError("Requested final d_z requires a tanh stretching factor above 10")
-    for _ in range(80):
-        middle = 0.5 * (lower + upper)
-        if _tanh_cell_size(height, middle, count, count - 1) < final_dz:
-            lower = middle
-        else:
-            upper = middle
-    return 0.5 * (lower + upper)
-
-
-def _solve_tanh_resolution_endpoints(
-    height: float, initial_dz: float, final_dz: float
-) -> tuple[int, float]:
-    target_ratio = final_dz / initial_dz
-
-    def solution(count: int) -> tuple[float, float]:
-        factor = _solve_tanh_factor_for_ratio(height, count, target_ratio)
-        actual_initial = _tanh_cell_size(height, factor, count, 0)
-        return factor, actual_initial
-
-    lower, upper = 2, 10_000_000
-    while lower < upper:
-        middle = (lower + upper) // 2
-        _, actual_initial = solution(middle)
-        if actual_initial > initial_dz:
-            lower = middle + 1
-        else:
-            upper = middle
-    candidates = {lower, max(2, lower - 1)}
-    count = min(candidates, key=lambda candidate: abs(solution(candidate)[1] - initial_dz))
-    factor, _ = solution(count)
-    return count, factor
+    z_levels = np.asarray(levels, dtype=float)
+    cell_sizes = np.diff(z_levels)
+    return {
+        "requested_dz_min": dz_min,
+        "requested_dz_max": dz_max,
+        "transition_height": transition_height,
+        "transition_width": transition_width,
+        "scale_factor": scale_factor,
+        "cell_sizes": cell_sizes,
+        "z_levels": z_levels,
+        "total_count": int(cell_sizes.size),
+        "effective_height": effective_height,
+    }
 
 
 def _ensure_larger_final_spacing(initial_dz: float, final_dz: float, name: str) -> None:
