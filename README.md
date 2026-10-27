@@ -211,6 +211,30 @@ x = [-L_in, L_x]
 
 The solved streamwise length used in the base-grid calculation is `L_in + L_x`. The inflow region is drawn as a dashed black box.
 
+### Outflow sponge region
+
+The **Outflow boundary** group configures ERF's high-x sponge (`erf.use_xhi_sponge_damping`). Enable **Enable sponge region** and enter the sponge thickness measured inward from the outflow face. In FarmVis visual coordinates, and in ERF's solved-domain coordinates, the start locations are:
+
+```text
+x_start,visual = L_x - outflow_sponge_thickness
+erf.xhi_sponge_start = L_in + L_x - outflow_sponge_thickness
+```
+
+The thickness may span the full solved x extent, including the inflow region. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** draws a dashed rectangle on the high-x domain face. The opacity slider is available for the Uniform representation.
+
+### Spanwise sponge regions
+
+The **Spanwise boundaries** group configures equal sponge layers at ERF's low-y and high-y boundaries (`erf.use_ylo_sponge_damping` and `erf.use_yhi_sponge_damping`). The thickness is measured inward from each lateral face:
+
+```text
+erf.ylo_sponge_end = spanwise_sponge_thickness
+erf.yhi_sponge_start = L_y - spanwise_sponge_thickness
+```
+
+Each thickness may extend across the full `L_y`; thicknesses greater than half of `L_y` produce overlapping low-y and high-y sponge volumes, matching ERF's independent boundary switches. The sponge volumes span the full solved x extent, including the inflow region. **Uniform** draws two translucent interior volumes; **Dashed** outlines the two lateral domain faces. The opacity slider is available for the Uniform representation.
+
+These regions follow ERF's volumetric sponge formulation `dQ/dt = RHS - A xi^n (Q - Q_target)`, where `xi` increases from zero at the inner edge of a sponge to one at its domain face. FarmVis currently describes the sponge geometry and its visualization; ERF's sponge strength and target-state inputs remain case-level solver settings.
+
 ### Rayleigh damping region
 
 The **Top boundary** group contains the Rayleigh damping controls. Enable **Enable Rayleigh region**, enter the layer depth `H`, and set the inverse damping timescale `erf.rayleigh_dampcoef` in s^-1.

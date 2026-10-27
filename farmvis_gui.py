@@ -464,6 +464,38 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         inflow_layout.addWidget(self._form_row(("", self.inflow_enabled), ("L_in (m)", self.lin)))
         layout.addWidget(inflow_group)
 
+        (
+            outflow_group,
+            self.outflow_sponge_enabled,
+            self.outflow_sponge_thickness,
+            self.outflow_sponge_representation,
+            self.outflow_sponge_opacity,
+            self.outflow_sponge_opacity_value,
+            self.outflow_sponge_parameter_row,
+            self.outflow_sponge_representation_row,
+            self.outflow_sponge_opacity_row,
+        ) = self._sponge_boundary_group(
+            "Outflow boundary",
+            "Thickness inward from the high-x outflow face (erf.xhi_sponge_start).",
+        )
+        layout.addWidget(outflow_group)
+
+        (
+            spanwise_group,
+            self.spanwise_sponge_enabled,
+            self.spanwise_sponge_thickness,
+            self.spanwise_sponge_representation,
+            self.spanwise_sponge_opacity,
+            self.spanwise_sponge_opacity_value,
+            self.spanwise_sponge_parameter_row,
+            self.spanwise_sponge_representation_row,
+            self.spanwise_sponge_opacity_row,
+        ) = self._sponge_boundary_group(
+            "Spanwise boundaries",
+            "Thickness inward from both lateral faces (erf.ylo_sponge_end and erf.yhi_sponge_start).",
+        )
+        layout.addWidget(spanwise_group)
+
         top_group = QtWidgets.QGroupBox("Top boundary")
         top_layout = QtWidgets.QVBoxLayout(top_group)
         self.rayleigh_enabled = QtWidgets.QCheckBox("Enable Rayleigh region")
@@ -504,6 +536,20 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         top_layout.addWidget(self.rayleigh_opacity_row)
         layout.addWidget(top_group)
         self.inflow_enabled.toggled.connect(self._update_boundary_controls)
+        self.outflow_sponge_enabled.toggled.connect(self._update_boundary_controls)
+        self.outflow_sponge_representation.currentIndexChanged.connect(
+            self._update_boundary_controls
+        )
+        self.outflow_sponge_opacity.valueChanged.connect(
+            lambda value: self.outflow_sponge_opacity_value.setText(f"{value / 100.0:.2f}")
+        )
+        self.spanwise_sponge_enabled.toggled.connect(self._update_boundary_controls)
+        self.spanwise_sponge_representation.currentIndexChanged.connect(
+            self._update_boundary_controls
+        )
+        self.spanwise_sponge_opacity.valueChanged.connect(
+            lambda value: self.spanwise_sponge_opacity_value.setText(f"{value / 100.0:.2f}")
+        )
         self.rayleigh_enabled.toggled.connect(self._update_boundary_controls)
         self.rayleigh_representation.currentIndexChanged.connect(self._update_boundary_controls)
         self.rayleigh_opacity.valueChanged.connect(
@@ -512,8 +558,74 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self._update_boundary_controls()
         layout.addStretch(1)
 
+    def _sponge_boundary_group(
+        self,
+        title: str,
+        thickness_tooltip: str,
+    ) -> tuple:
+        group = QtWidgets.QGroupBox(title)
+        group_layout = QtWidgets.QVBoxLayout(group)
+        enabled = QtWidgets.QCheckBox("Enable sponge region")
+        thickness = self._float(500.0, minimum=0.001, step=50.0)
+        thickness.setToolTip(thickness_tooltip)
+        representation = QtWidgets.QComboBox()
+        representation.addItem("Uniform", "uniform")
+        representation.addItem("Dashed", "dashed")
+        opacity = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        opacity.setRange(0, 100)
+        opacity.setValue(15)
+        opacity.setToolTip("3D sponge-volume opacity from 0 to 1.")
+        opacity_value = QtWidgets.QLabel("0.15")
+        parameter_row = self._form_row(("Sponge thickness (m)", thickness))
+        representation_row = self._form_row(("3D representation", representation))
+        opacity_row = self._form_row(
+            ("Opacity", opacity),
+            ("", opacity_value),
+        )
+        group_layout.addWidget(enabled)
+        group_layout.addWidget(parameter_row)
+        group_layout.addWidget(representation_row)
+        group_layout.addWidget(opacity_row)
+        return (
+            group,
+            enabled,
+            thickness,
+            representation,
+            opacity,
+            opacity_value,
+            parameter_row,
+            representation_row,
+            opacity_row,
+        )
+
     def _update_boundary_controls(self, _value: object | None = None) -> None:
         self.lin.setEnabled(self.inflow_enabled.isChecked())
+        for enabled, thickness, representation, parameter_row, representation_row, opacity_row in (
+            (
+                self.outflow_sponge_enabled,
+                self.outflow_sponge_thickness,
+                self.outflow_sponge_representation,
+                self.outflow_sponge_parameter_row,
+                self.outflow_sponge_representation_row,
+                self.outflow_sponge_opacity_row,
+            ),
+            (
+                self.spanwise_sponge_enabled,
+                self.spanwise_sponge_thickness,
+                self.spanwise_sponge_representation,
+                self.spanwise_sponge_parameter_row,
+                self.spanwise_sponge_representation_row,
+                self.spanwise_sponge_opacity_row,
+            ),
+        ):
+            sponge_enabled = enabled.isChecked()
+            thickness.setEnabled(sponge_enabled)
+            representation.setEnabled(sponge_enabled)
+            parameter_row.setVisible(sponge_enabled)
+            representation_row.setVisible(sponge_enabled)
+            opacity_row.setVisible(
+                sponge_enabled and representation.currentData() == "uniform"
+            )
         rayleigh_enabled = self.rayleigh_enabled.isChecked()
         self.rayleigh_depth.setEnabled(rayleigh_enabled)
         self.rayleigh_dampcoef.setEnabled(rayleigh_enabled)
@@ -831,6 +943,14 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             rayleigh_dampcoef=self.rayleigh_dampcoef.value(),
             rayleigh_representation=self.rayleigh_representation.currentData(),
             rayleigh_opacity=self.rayleigh_opacity.value() / 100.0,
+            outflow_sponge_enabled=self.outflow_sponge_enabled.isChecked(),
+            outflow_sponge_thickness=self.outflow_sponge_thickness.value(),
+            outflow_sponge_representation=self.outflow_sponge_representation.currentData(),
+            outflow_sponge_opacity=self.outflow_sponge_opacity.value() / 100.0,
+            spanwise_sponge_enabled=self.spanwise_sponge_enabled.isChecked(),
+            spanwise_sponge_thickness=self.spanwise_sponge_thickness.value(),
+            spanwise_sponge_representation=self.spanwise_sponge_representation.currentData(),
+            spanwise_sponge_opacity=self.spanwise_sponge_opacity.value() / 100.0,
             max_level=self.max_level.value(),
             amr_levels=[AMRLevelConfig(level_index=index, **self._editor_values(editor)) for index, editor in enumerate(self.amr_editors, start=1)],
         )
@@ -960,6 +1080,37 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         ]
         if domain.inflow_enabled:
             boundary_rows.append(("Inflow length L_in (m)", domain.Lin))
+        boundary_rows.append(
+            ("Outflow sponge", "Enabled" if domain.outflow_sponge_enabled else "Disabled")
+        )
+        if domain.outflow_sponge_enabled:
+            boundary_rows.extend(
+                [
+                    ("Outflow sponge thickness (m)", domain.outflow_sponge_thickness),
+                    ("Outflow 3D representation", domain.outflow_sponge_representation.title()),
+                ]
+            )
+            if domain.outflow_sponge_representation.strip().lower() != "dashed":
+                boundary_rows.append(
+                    ("Outflow sponge opacity", f"{domain.outflow_sponge_opacity:.2f}")
+                )
+        boundary_rows.append(
+            ("Spanwise sponges", "Enabled" if domain.spanwise_sponge_enabled else "Disabled")
+        )
+        if domain.spanwise_sponge_enabled:
+            boundary_rows.extend(
+                [
+                    ("Spanwise sponge thickness (m)", domain.spanwise_sponge_thickness),
+                    (
+                        "Spanwise 3D representation",
+                        domain.spanwise_sponge_representation.title(),
+                    ),
+                ]
+            )
+            if domain.spanwise_sponge_representation.strip().lower() != "dashed":
+                boundary_rows.append(
+                    ("Spanwise sponge opacity", f"{domain.spanwise_sponge_opacity:.2f}")
+                )
         if domain.rayleigh_enabled:
             boundary_rows.extend(
                 [
@@ -968,7 +1119,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                     ("3D representation", domain.rayleigh_representation.title()),
                 ]
             )
-            if domain.rayleigh_representation != "dashed":
+            if domain.rayleigh_representation.strip().lower() != "dashed":
                 boundary_rows.append(("Maximum opacity", f"{domain.rayleigh_opacity:.2f}"))
         blocks.append(table("Boundary Conditions", boundary_rows))
         if amr["levels"]:
@@ -1251,6 +1402,24 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         )
         self.rayleigh_representation.setCurrentIndex(max(0, rayleigh_representation_index))
         self.rayleigh_opacity.setValue(round(100.0 * domain.rayleigh_opacity))
+        self.outflow_sponge_enabled.setChecked(domain.outflow_sponge_enabled)
+        self.outflow_sponge_thickness.setValue(domain.outflow_sponge_thickness)
+        outflow_representation_index = self.outflow_sponge_representation.findData(
+            domain.outflow_sponge_representation
+        )
+        self.outflow_sponge_representation.setCurrentIndex(
+            max(0, outflow_representation_index)
+        )
+        self.outflow_sponge_opacity.setValue(round(100.0 * domain.outflow_sponge_opacity))
+        self.spanwise_sponge_enabled.setChecked(domain.spanwise_sponge_enabled)
+        self.spanwise_sponge_thickness.setValue(domain.spanwise_sponge_thickness)
+        spanwise_representation_index = self.spanwise_sponge_representation.findData(
+            domain.spanwise_sponge_representation
+        )
+        self.spanwise_sponge_representation.setCurrentIndex(
+            max(0, spanwise_representation_index)
+        )
+        self.spanwise_sponge_opacity.setValue(round(100.0 * domain.spanwise_sponge_opacity))
         self._update_boundary_controls()
         self.max_level.setValue(domain.max_level if domain.vertical_discretization == "uniform" else 0)
         self.rotor_diameter.setValue(study.rotor_diameter)

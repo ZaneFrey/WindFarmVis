@@ -49,6 +49,14 @@ class DomainConfig:
     rayleigh_dampcoef: float = 0.2
     rayleigh_representation: str = "uniform"
     rayleigh_opacity: float = 0.15
+    outflow_sponge_enabled: bool = False
+    outflow_sponge_thickness: float = 500.0
+    outflow_sponge_representation: str = "uniform"
+    outflow_sponge_opacity: float = 0.15
+    spanwise_sponge_enabled: bool = False
+    spanwise_sponge_thickness: float = 500.0
+    spanwise_sponge_representation: str = "uniform"
+    spanwise_sponge_opacity: float = 0.15
     max_level: int = 0
     amr_levels: list["AMRLevelConfig"] = field(default_factory=list)
 
@@ -109,6 +117,27 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             )
         if not 0.0 <= domain_config.rayleigh_opacity <= 1.0:
             raise ValueError("rayleigh_opacity must be between 0 and 1")
+
+    solved_x_length = domain_config.Lx + inflow_length
+    if domain_config.outflow_sponge_enabled:
+        _validate_sponge_visualization(
+            domain_config.outflow_sponge_thickness,
+            domain_config.outflow_sponge_representation,
+            domain_config.outflow_sponge_opacity,
+            "outflow_sponge",
+        )
+        if domain_config.outflow_sponge_thickness > solved_x_length:
+            raise ValueError("outflow_sponge_thickness cannot exceed the solved x length")
+
+    if domain_config.spanwise_sponge_enabled:
+        _validate_sponge_visualization(
+            domain_config.spanwise_sponge_thickness,
+            domain_config.spanwise_sponge_representation,
+            domain_config.spanwise_sponge_opacity,
+            "spanwise_sponge",
+        )
+        if domain_config.spanwise_sponge_thickness > domain_config.Ly:
+            raise ValueError("spanwise_sponge_thickness cannot exceed Ly")
 
     requested_height = domain_config.Lz
     effective_height = requested_height
@@ -275,6 +304,36 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 effective_height,
             )
             if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0
+            else None,
+            "outflow_sponge": (
+                domain_config.Lx - domain_config.outflow_sponge_thickness,
+                domain_config.Lx,
+                0.0,
+                domain_config.Ly,
+                0.0,
+                effective_height,
+            )
+            if domain_config.outflow_sponge_enabled
+            else None,
+            "spanwise_sponge": (
+                (
+                    -inflow_length,
+                    domain_config.Lx,
+                    0.0,
+                    domain_config.spanwise_sponge_thickness,
+                    0.0,
+                    effective_height,
+                ),
+                (
+                    -inflow_length,
+                    domain_config.Lx,
+                    domain_config.Ly - domain_config.spanwise_sponge_thickness,
+                    domain_config.Ly,
+                    0.0,
+                    effective_height,
+                ),
+            )
+            if domain_config.spanwise_sponge_enabled
             else None,
         },
         "domain_lengths": {
@@ -688,6 +747,14 @@ def serialize_configs(
             "rayleigh_dampcoef": domain_config.rayleigh_dampcoef,
             "rayleigh_representation": domain_config.rayleigh_representation,
             "rayleigh_opacity": domain_config.rayleigh_opacity,
+            "outflow_sponge_enabled": domain_config.outflow_sponge_enabled,
+            "outflow_sponge_thickness": domain_config.outflow_sponge_thickness,
+            "outflow_sponge_representation": domain_config.outflow_sponge_representation,
+            "outflow_sponge_opacity": domain_config.outflow_sponge_opacity,
+            "spanwise_sponge_enabled": domain_config.spanwise_sponge_enabled,
+            "spanwise_sponge_thickness": domain_config.spanwise_sponge_thickness,
+            "spanwise_sponge_representation": domain_config.spanwise_sponge_representation,
+            "spanwise_sponge_opacity": domain_config.spanwise_sponge_opacity,
             "max_level": domain_config.max_level,
             "amr_levels": [
                 {
@@ -830,6 +897,18 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         rayleigh_dampcoef=float(domain_data.get("rayleigh_dampcoef", 0.2)),
         rayleigh_representation=str(domain_data.get("rayleigh_representation", "uniform")),
         rayleigh_opacity=float(domain_data.get("rayleigh_opacity", 0.15)),
+        outflow_sponge_enabled=bool(domain_data.get("outflow_sponge_enabled", False)),
+        outflow_sponge_thickness=float(domain_data.get("outflow_sponge_thickness", 500.0)),
+        outflow_sponge_representation=str(
+            domain_data.get("outflow_sponge_representation", "uniform")
+        ),
+        outflow_sponge_opacity=float(domain_data.get("outflow_sponge_opacity", 0.15)),
+        spanwise_sponge_enabled=bool(domain_data.get("spanwise_sponge_enabled", False)),
+        spanwise_sponge_thickness=float(domain_data.get("spanwise_sponge_thickness", 500.0)),
+        spanwise_sponge_representation=str(
+            domain_data.get("spanwise_sponge_representation", "uniform")
+        ),
+        spanwise_sponge_opacity=float(domain_data.get("spanwise_sponge_opacity", 0.15)),
         max_level=int(domain_data.get("max_level", 0)),
         amr_levels=[
             AMRLevelConfig(
@@ -1077,6 +1156,61 @@ def populate_3d_scene(
             )
     else:
         plotter.remove_actor("rayleigh-region", reset_camera=False, render=False)
+
+    sponge_actor_names = (
+        "outflow-sponge",
+        "spanwise-sponge-low",
+        "spanwise-sponge-high",
+    )
+    for actor_name in sponge_actor_names:
+        plotter.remove_actor(actor_name, reset_camera=False, render=False)
+
+    outflow_sponge_bounds = metrics["domain_bounds"]["outflow_sponge"]
+    if outflow_sponge_bounds is not None:
+        if domain_config.outflow_sponge_representation.strip().lower() == "dashed":
+            outflow_sponge_mesh = _dashed_face_polydata(
+                outflow_sponge_bounds, axis="x", side="high"
+            )
+            plotter.add_mesh(
+                outflow_sponge_mesh,
+                color="lightskyblue",
+                line_width=2,
+                name="outflow-sponge",
+            )
+        else:
+            plotter.add_mesh(
+                pv.Box(bounds=outflow_sponge_bounds),
+                color="lightskyblue",
+                opacity=domain_config.outflow_sponge_opacity,
+                show_edges=False,
+                name="outflow-sponge",
+            )
+
+    spanwise_sponge_bounds = metrics["domain_bounds"]["spanwise_sponge"]
+    if spanwise_sponge_bounds is not None:
+        representation = domain_config.spanwise_sponge_representation.strip().lower()
+        for label, bounds, side in zip(
+            ("low", "high"),
+            spanwise_sponge_bounds,
+            ("low", "high"),
+            strict=True,
+        ):
+            if representation == "dashed":
+                mesh = _dashed_face_polydata(bounds, axis="y", side=side)
+                plotter.add_mesh(
+                    mesh,
+                    color="lightskyblue",
+                    line_width=2,
+                    name=f"spanwise-sponge-{label}",
+                )
+            else:
+                plotter.add_mesh(
+                    pv.Box(bounds=bounds),
+                    color="lightskyblue",
+                    opacity=domain_config.spanwise_sponge_opacity,
+                    show_edges=False,
+                    name=f"spanwise-sponge-{label}",
+                )
 
     for actor_name in tuple(plotter.actors):
         if actor_name.startswith("amr-level-"):
@@ -1372,6 +1506,47 @@ def _dashed_rayleigh_base_polydata(
         np.array([xmax, ymax, zmin]),
         np.array([xmin, ymax, zmin]),
     )
+    segments = []
+    for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+        edge_length = float(np.linalg.norm(end - start))
+        dash_length = max(edge_length * dash_fraction, edge_length / 80.0)
+        gap_length = max(edge_length * gap_fraction, edge_length / 120.0)
+        distance = 0.0
+        direction = (end - start) / edge_length
+        while distance < edge_length:
+            dash_end = min(distance + dash_length, edge_length)
+            segments.append(pv.Line(start + direction * distance, start + direction * dash_end))
+            distance = dash_end + gap_length
+    return _merge_line_segments(segments)
+
+
+def _dashed_face_polydata(
+    bounds: tuple[float, float, float, float, float, float],
+    axis: str,
+    side: str,
+    dash_fraction: float = 0.06,
+    gap_fraction: float = 0.04,
+) -> pv.PolyData:
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    if axis == "x":
+        x = xmin if side == "low" else xmax
+        corners = (
+            np.array([x, ymin, zmin]),
+            np.array([x, ymax, zmin]),
+            np.array([x, ymax, zmax]),
+            np.array([x, ymin, zmax]),
+        )
+    elif axis == "y":
+        y = ymin if side == "low" else ymax
+        corners = (
+            np.array([xmin, y, zmin]),
+            np.array([xmax, y, zmin]),
+            np.array([xmax, y, zmax]),
+            np.array([xmin, y, zmax]),
+        )
+    else:
+        raise ValueError("axis must be 'x' or 'y'")
+
     segments = []
     for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
         edge_length = float(np.linalg.norm(end - start))
@@ -1854,6 +2029,19 @@ def _ensure_larger_final_spacing(initial_dz: float, final_dz: float, name: str) 
     _ensure_positive(final_dz, name)
     if final_dz <= initial_dz:
         raise ValueError(f"{name} must be greater than the initial d_z")
+
+
+def _validate_sponge_visualization(
+    thickness: float,
+    representation: str,
+    opacity: float,
+    name: str,
+) -> None:
+    _ensure_positive(thickness, f"{name}_thickness")
+    if representation.strip().lower() not in {"uniform", "dashed"}:
+        raise ValueError(f"{name}_representation must be 'uniform' or 'dashed'")
+    if not 0.0 <= opacity <= 1.0:
+        raise ValueError(f"{name}_opacity must be between 0 and 1")
 
 
 def _ensure_positive(value: float | int, name: str) -> None:
