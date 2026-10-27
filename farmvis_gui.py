@@ -242,7 +242,7 @@ class CameraControlDialog(QtWidgets.QDialog):
 class FarmVisWindow(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("ERF Wind Farm Domain Visualizer")
+        self.setWindowTitle("Domain Designer")
         self.resize(760, 940)
         self.cluster_editors: list[dict] = []
         self.amr_editors: list[dict] = []
