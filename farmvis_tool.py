@@ -46,6 +46,9 @@ class DomainConfig:
     Lin: float = 0.0
     rayleigh_enabled: bool = False
     rayleigh_depth: float = 0.0
+    rayleigh_dampcoef: float = 0.2
+    rayleigh_representation: str = "uniform"
+    rayleigh_opacity: float = 0.15
     max_level: int = 0
     amr_levels: list["AMRLevelConfig"] = field(default_factory=list)
 
@@ -97,7 +100,15 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
         _ensure_nonnegative(domain_config.Lin, "Lin")
 
     if domain_config.rayleigh_enabled:
-        _ensure_nonnegative(domain_config.rayleigh_depth, "rayleigh_depth")
+        _ensure_positive(domain_config.rayleigh_depth, "rayleigh_depth")
+        _ensure_positive(domain_config.rayleigh_dampcoef, "rayleigh_dampcoef")
+        rayleigh_representation = domain_config.rayleigh_representation.strip().lower()
+        if rayleigh_representation not in {"uniform", "functional", "dashed"}:
+            raise ValueError(
+                "rayleigh_representation must be 'uniform', 'functional', or 'dashed'"
+            )
+        if not 0.0 <= domain_config.rayleigh_opacity <= 1.0:
+            raise ValueError("rayleigh_opacity must be between 0 and 1")
 
     requested_height = domain_config.Lz
     effective_height = requested_height
@@ -674,6 +685,9 @@ def serialize_configs(
             "Lin": domain_config.Lin,
             "rayleigh_enabled": domain_config.rayleigh_enabled,
             "rayleigh_depth": domain_config.rayleigh_depth,
+            "rayleigh_dampcoef": domain_config.rayleigh_dampcoef,
+            "rayleigh_representation": domain_config.rayleigh_representation,
+            "rayleigh_opacity": domain_config.rayleigh_opacity,
             "max_level": domain_config.max_level,
             "amr_levels": [
                 {
@@ -813,6 +827,9 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         Lin=float(domain_data.get("Lin", 0.0)),
         rayleigh_enabled=bool(domain_data.get("rayleigh_enabled", False)),
         rayleigh_depth=float(domain_data.get("rayleigh_depth", 0.0)),
+        rayleigh_dampcoef=float(domain_data.get("rayleigh_dampcoef", 0.2)),
+        rayleigh_representation=str(domain_data.get("rayleigh_representation", "uniform")),
+        rayleigh_opacity=float(domain_data.get("rayleigh_opacity", 0.15)),
         max_level=int(domain_data.get("max_level", 0)),
         amr_levels=[
             AMRLevelConfig(
@@ -1030,13 +1047,34 @@ def populate_3d_scene(
 
     rayleigh_bounds = metrics["domain_bounds"]["rayleigh"]
     if rayleigh_bounds is not None:
-        plotter.add_mesh(
-            _rayleigh_surface_polydata(rayleigh_bounds),
-            color="lightgray",
-            opacity=0.15,
-            show_edges=False,
-            name="rayleigh-region",
-        )
+        representation = domain_config.rayleigh_representation.strip().lower()
+        if representation == "functional":
+            plotter.add_mesh(
+                _rayleigh_functional_surface_polydata(
+                    rayleigh_bounds,
+                    max_opacity=domain_config.rayleigh_opacity,
+                ),
+                scalars="rayleigh_rgba",
+                rgba=True,
+                show_edges=False,
+                show_scalar_bar=False,
+                name="rayleigh-region",
+            )
+        elif representation == "dashed":
+            plotter.add_mesh(
+                _dashed_rayleigh_base_polydata(rayleigh_bounds),
+                color="lightgray",
+                line_width=2,
+                name="rayleigh-region",
+            )
+        else:
+            plotter.add_mesh(
+                _rayleigh_surface_polydata(rayleigh_bounds),
+                color="lightgray",
+                opacity=domain_config.rayleigh_opacity,
+                show_edges=False,
+                name="rayleigh-region",
+            )
     else:
         plotter.remove_actor("rayleigh-region", reset_camera=False, render=False)
 
@@ -1242,6 +1280,110 @@ def _rayleigh_surface_polydata(
         dtype=np.int64,
     )
     return pv.PolyData(points, faces)
+
+
+def rayleigh_damping_ramp(
+    z: float | np.ndarray,
+    z_top: float,
+    depth: float,
+) -> float | np.ndarray:
+    """Return ERF's nondimensional sine-squared Rayleigh damping ramp R(z)."""
+    _ensure_positive(depth, "rayleigh_depth")
+    z_values = np.asarray(z, dtype=float)
+    fraction = np.clip(1.0 - (z_top - z_values) / depth, 0.0, 1.0)
+    ramp = np.where(
+        z_values > z_top - depth,
+        np.sin(0.5 * np.pi * fraction) ** 2,
+        0.0,
+    )
+    if np.isscalar(z):
+        return float(ramp)
+    return ramp
+
+
+def rayleigh_damping_coefficient(
+    z: float | np.ndarray,
+    z_top: float,
+    depth: float,
+    dampcoef: float,
+) -> float | np.ndarray:
+    """Return ERF's height-dependent Rayleigh damping coefficient tau(z)."""
+    _ensure_positive(dampcoef, "rayleigh_dampcoef")
+    return dampcoef * rayleigh_damping_ramp(z, z_top, depth)
+
+
+def _rayleigh_functional_surface_polydata(
+    bounds: tuple[float, float, float, float, float, float],
+    max_opacity: float,
+    layer_count: int = 48,
+) -> pv.PolyData:
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    z_edges = np.linspace(zmin, zmax, layer_count + 1)
+    points: list[list[float]] = []
+    faces: list[int] = []
+    opacity_values: list[float] = []
+    side_edges = (
+        ((xmin, ymin), (xmax, ymin)),
+        ((xmax, ymin), (xmax, ymax)),
+        ((xmax, ymax), (xmin, ymax)),
+        ((xmin, ymax), (xmin, ymin)),
+    )
+    for lower, upper in zip(z_edges[:-1], z_edges[1:], strict=True):
+        lower_opacity = max_opacity * rayleigh_damping_ramp(lower, zmax, zmax - zmin)
+        upper_opacity = max_opacity * rayleigh_damping_ramp(upper, zmax, zmax - zmin)
+        for (x0, y0), (x1, y1) in side_edges:
+            offset = len(points)
+            points.extend(
+                [
+                    [x0, y0, lower],
+                    [x1, y1, lower],
+                    [x1, y1, upper],
+                    [x0, y0, upper],
+                ]
+            )
+            faces.extend([4, offset, offset + 1, offset + 2, offset + 3])
+            opacity_values.extend(
+                [lower_opacity, lower_opacity, upper_opacity, upper_opacity]
+            )
+
+    mesh = pv.PolyData(np.asarray(points), np.asarray(faces, dtype=np.int64))
+    alpha = np.rint(255.0 * np.asarray(opacity_values)).astype(np.uint8)
+    rgba = np.column_stack(
+        [
+            np.full_like(alpha, 211),
+            np.full_like(alpha, 211),
+            np.full_like(alpha, 211),
+            alpha,
+        ]
+    )
+    mesh.point_data["rayleigh_rgba"] = rgba
+    return mesh
+
+
+def _dashed_rayleigh_base_polydata(
+    bounds: tuple[float, float, float, float, float, float],
+    dash_fraction: float = 0.06,
+    gap_fraction: float = 0.04,
+) -> pv.PolyData:
+    xmin, xmax, ymin, ymax, zmin, _ = bounds
+    corners = (
+        np.array([xmin, ymin, zmin]),
+        np.array([xmax, ymin, zmin]),
+        np.array([xmax, ymax, zmin]),
+        np.array([xmin, ymax, zmin]),
+    )
+    segments = []
+    for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
+        edge_length = float(np.linalg.norm(end - start))
+        dash_length = max(edge_length * dash_fraction, edge_length / 80.0)
+        gap_length = max(edge_length * gap_fraction, edge_length / 120.0)
+        distance = 0.0
+        direction = (end - start) / edge_length
+        while distance < edge_length:
+            dash_end = min(distance + dash_length, edge_length)
+            segments.append(pv.Line(start + direction * distance, start + direction * dash_end))
+            distance = dash_end + gap_length
+    return _merge_line_segments(segments)
 
 
 def _dashed_box_polydata(
@@ -1752,6 +1894,8 @@ __all__ = [
     "plot_xz",
     "plot_yz",
     "populate_3d_scene",
+    "rayleigh_damping_coefficient",
+    "rayleigh_damping_ramp",
     "save_layout_preset",
     "serialize_configs",
     "validate_configuration",

@@ -22,7 +22,7 @@ The application is intended for planning domain dimensions, numerical resolution
 
 FarmVis provides three native windows:
 
-1. **Control panel** — organizes inputs into **Domain**, **Wind Farm**, **AMR**, and **Presets** tabs, with validation messages, summaries, and actions available below every tab.
+1. **Control panel** — organizes inputs into **Domain**, **Boundary Conditions**, **Wind Farm**, **AMR**, and **Presets** tabs, with validation messages, summaries, and actions available below every tab.
 2. **3D domain view** — an interactive PyVista window for rotating, panning, and zooming around the domain.
 3. **2D views** — a tabbed window containing the `x-y`, `x-z`, and `y-z` projections.
 
@@ -111,13 +111,14 @@ The `--prune` option removes packages that are no longer declared by the environ
 
 1. Launch `farmvis_gui.py` from the activated `farmvis` environment.
 2. Set the domain dimensions and base-grid resolution in the **Domain** tab.
-3. Set the turbine model dimensions and define one or more clusters in the **Wind Farm** tab.
-4. Configure any nested refinement boxes in the **AMR** tab.
-5. Click **Update Visualizations**.
-6. Inspect validation warnings and numerical summaries in the control panel.
-7. Rotate and inspect the native 3D view, then review the three 2D projections.
-8. Save the configuration as a JSON preset from the **Presets** tab if it will be reused.
-9. Click **Export Coordinates** to generate the turbine-coordinate input file.
+3. Configure the optional inflow and Rayleigh regions in the **Boundary Conditions** tab.
+4. Set the turbine model dimensions and define one or more clusters in the **Wind Farm** tab.
+5. Configure any nested refinement boxes in the **AMR** tab.
+6. Click **Update Visualizations**.
+7. Inspect validation warnings and numerical summaries in the control panel.
+8. Rotate and inspect the native 3D view, then review the three 2D projections.
+9. Save the configuration as a JSON preset from the **Presets** tab if it will be reused.
+10. Click **Export Coordinates** to generate the turbine-coordinate input file.
 
 Changing a control does not immediately rebuild the visualization. Click **Update Visualizations** after making changes.
 
@@ -196,6 +197,8 @@ d_z(z) = d_z,min + 0.5 (d_z,max - d_z,min)
 
 Starting at the ground, FarmVis evaluates this function at each cell's lower edge and advances by the resulting target spacing. The transition height locates the midpoint between the minimum and maximum spacing, while the transition width controls how gradually the change occurs. By default, the generated profile is scaled slightly so its final edge lands exactly on `L_z`. With exact vertical inputs enabled, the target spacings are retained and `L_z` snaps to the nearest generated edge instead.
 
+## Boundary Conditions
+
 ### Inflow region
 
 Enable **Enable inflow region** and enter `L_in` to prepend an upstream turbulence-generation region.
@@ -210,7 +213,22 @@ The solved streamwise length used in the base-grid calculation is `L_in + L_x`. 
 
 ### Rayleigh damping region
 
-Enable **Enable Rayleigh region** and enter a depth to reserve a damping layer at the top of the domain.
+The **Top boundary** group contains the Rayleigh damping controls. Enable **Enable Rayleigh region**, enter the layer depth `H`, and set the inverse damping timescale `erf.rayleigh_dampcoef` in s^-1.
+
+Following ERF, the height-dependent damping coefficient is `tau(z) = alpha R(z)`, where `alpha` is `erf.rayleigh_dampcoef`. Within the upper damping depth `H = erf.rayleigh_zdamp`, the nondimensional ramp is
+
+```text
+R(z) = sin^2[(pi / 2) (1 - (z_top - z) / H)]  for z > z_top - H
+R(z) = 0                                           otherwise
+```
+
+The **3D representation** selector controls how the Rayleigh layer is drawn:
+
+- **Uniform** — draws the four exterior side faces with constant opacity.
+- **Functional** — varies the side-face opacity with `R(z)`, from transparent at the layer bottom to the selected maximum opacity at the model top.
+- **Dashed** — draws only a dashed domain-border outline at the bottom of the damping layer.
+
+The **Maximum opacity** slider is available for Uniform and Functional representations and ranges from `0` to `1`.
 
 The damping region occupies the full solved-domain footprint, including the inflow region when enabled:
 
@@ -220,7 +238,7 @@ y = [0, L_y]
 z = [L_z - depth, L_z]
 ```
 
-It remains inside `L_z`; it does not increase the domain height. The visualization consists only of faint, semitransparent strips on the four exterior side faces, with no top face, interior lower face, or filled volume. The vertical 2D projections show the corresponding side boundary segments.
+It remains inside `L_z`; it does not increase the domain height. Uniform and Functional visualizations use only the four exterior side faces, with no top face, interior lower face, or filled volume. The vertical 2D projections continue to show the corresponding side boundary segments.
 
 ## AMR Controls
 

@@ -280,6 +280,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.control_tabs = QtWidgets.QTabWidget()
         self.panel_splitter.addWidget(self.control_tabs)
         self._build_domain_controls()
+        self._build_boundary_conditions_controls()
         self._build_farm_controls()
         self._build_amr_controls()
         self._build_preset_controls()
@@ -452,16 +453,77 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.piecewise_parameter_mode.currentIndexChanged.connect(self._update_vertical_controls)
         self._update_vertical_controls()
 
+    def _build_boundary_conditions_controls(self) -> None:
+        layout = self._control_tab("Boundary Conditions")
+
+        inflow_group = QtWidgets.QGroupBox("Inflow boundary")
+        inflow_layout = QtWidgets.QVBoxLayout(inflow_group)
         self.inflow_enabled = QtWidgets.QCheckBox("Enable inflow region")
         self.inflow_enabled.setChecked(True)
         self.lin = self._float(2000.0, minimum=0.0, step=100.0)
+        inflow_layout.addWidget(self._form_row(("", self.inflow_enabled), ("L_in (m)", self.lin)))
+        layout.addWidget(inflow_group)
+
+        top_group = QtWidgets.QGroupBox("Top boundary")
+        top_layout = QtWidgets.QVBoxLayout(top_group)
         self.rayleigh_enabled = QtWidgets.QCheckBox("Enable Rayleigh region")
         self.rayleigh_enabled.setChecked(True)
-        self.rayleigh_depth = self._float(300.0, minimum=0.0, step=25.0)
-        layout.addWidget(self._form_row(("", self.inflow_enabled), ("L_in (m)", self.lin)))
-        layout.addWidget(self._form_row(("", self.rayleigh_enabled), ("Depth (m)", self.rayleigh_depth)))
-        self.inflow_enabled.toggled.connect(lambda enabled: self.lin.setEnabled(enabled))
-        self.rayleigh_enabled.toggled.connect(lambda enabled: self.rayleigh_depth.setEnabled(enabled))
+        self.rayleigh_depth = self._float(300.0, minimum=0.001, step=25.0)
+        self.rayleigh_depth.setToolTip("ERF erf.rayleigh_zdamp: damping-layer depth H (m).")
+        self.rayleigh_dampcoef = QtWidgets.QDoubleSpinBox()
+        self.rayleigh_dampcoef.setRange(0.000001, 1_000_000.0)
+        self.rayleigh_dampcoef.setDecimals(6)
+        self.rayleigh_dampcoef.setSingleStep(0.01)
+        self.rayleigh_dampcoef.setValue(0.2)
+        self.rayleigh_dampcoef.setToolTip(
+            "ERF erf.rayleigh_dampcoef (s^-1): tau(z) = alpha R(z)."
+        )
+        self.rayleigh_representation = QtWidgets.QComboBox()
+        self.rayleigh_representation.addItem("Uniform", "uniform")
+        self.rayleigh_representation.addItem("Functional", "functional")
+        self.rayleigh_representation.addItem("Dashed", "dashed")
+        self.rayleigh_opacity = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.rayleigh_opacity.setRange(0, 100)
+        self.rayleigh_opacity.setValue(15)
+        self.rayleigh_opacity.setToolTip("Maximum 3D Rayleigh-layer opacity from 0 to 1.")
+        self.rayleigh_opacity_value = QtWidgets.QLabel("0.15")
+        self.rayleigh_opacity_row = self._form_row(
+            ("Maximum opacity", self.rayleigh_opacity),
+            ("", self.rayleigh_opacity_value),
+        )
+        top_layout.addWidget(self.rayleigh_enabled)
+        self.rayleigh_parameter_row = self._form_row(
+            ("Depth, H (m)", self.rayleigh_depth),
+            ("Damping coefficient, alpha (s^-1)", self.rayleigh_dampcoef),
+        )
+        self.rayleigh_representation_row = self._form_row(
+            ("3D representation", self.rayleigh_representation)
+        )
+        top_layout.addWidget(self.rayleigh_parameter_row)
+        top_layout.addWidget(self.rayleigh_representation_row)
+        top_layout.addWidget(self.rayleigh_opacity_row)
+        layout.addWidget(top_group)
+        self.inflow_enabled.toggled.connect(self._update_boundary_controls)
+        self.rayleigh_enabled.toggled.connect(self._update_boundary_controls)
+        self.rayleigh_representation.currentIndexChanged.connect(self._update_boundary_controls)
+        self.rayleigh_opacity.valueChanged.connect(
+            lambda value: self.rayleigh_opacity_value.setText(f"{value / 100.0:.2f}")
+        )
+        self._update_boundary_controls()
+        layout.addStretch(1)
+
+    def _update_boundary_controls(self, _value: object | None = None) -> None:
+        self.lin.setEnabled(self.inflow_enabled.isChecked())
+        rayleigh_enabled = self.rayleigh_enabled.isChecked()
+        self.rayleigh_depth.setEnabled(rayleigh_enabled)
+        self.rayleigh_dampcoef.setEnabled(rayleigh_enabled)
+        self.rayleigh_representation.setEnabled(rayleigh_enabled)
+        self.rayleigh_parameter_row.setVisible(rayleigh_enabled)
+        self.rayleigh_representation_row.setVisible(rayleigh_enabled)
+        self.rayleigh_opacity_row.setVisible(
+            rayleigh_enabled
+            and self.rayleigh_representation.currentData() in {"uniform", "functional"}
+        )
 
     def _build_amr_controls(self) -> None:
         layout = self._control_tab("AMR")
@@ -766,6 +828,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             piecewise_tanh_transition_width=self.piecewise_tanh_transition_width.value(),
             inflow_enabled=self.inflow_enabled.isChecked(), Lin=self.lin.value(),
             rayleigh_enabled=self.rayleigh_enabled.isChecked(), rayleigh_depth=self.rayleigh_depth.value(),
+            rayleigh_dampcoef=self.rayleigh_dampcoef.value(),
+            rayleigh_representation=self.rayleigh_representation.currentData(),
+            rayleigh_opacity=self.rayleigh_opacity.value() / 100.0,
             max_level=self.max_level.value(),
             amr_levels=[AMRLevelConfig(level_index=index, **self._editor_values(editor)) for index, editor in enumerate(self.amr_editors, start=1)],
         )
@@ -889,6 +954,23 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             body = "".join(f"<tr><td>{html.escape(str(key))}</td><td>{html.escape(str(value))}</td></tr>" for key, value in pairs)
             return f"<h3>{title}</h3><table border='1' cellspacing='0' cellpadding='4'>{body}</table>"
         blocks = [table("Domain and Grid Summary", rows)]
+        boundary_rows: list[tuple[str, object]] = [
+            ("Inflow region", "Enabled" if domain.inflow_enabled else "Disabled"),
+            ("Rayleigh region", "Enabled" if domain.rayleigh_enabled else "Disabled"),
+        ]
+        if domain.inflow_enabled:
+            boundary_rows.append(("Inflow length L_in (m)", domain.Lin))
+        if domain.rayleigh_enabled:
+            boundary_rows.extend(
+                [
+                    ("Rayleigh depth H (m)", domain.rayleigh_depth),
+                    ("Rayleigh dampcoef (s^-1)", domain.rayleigh_dampcoef),
+                    ("3D representation", domain.rayleigh_representation.title()),
+                ]
+            )
+            if domain.rayleigh_representation != "dashed":
+                boundary_rows.append(("Maximum opacity", f"{domain.rayleigh_opacity:.2f}"))
+        blocks.append(table("Boundary Conditions", boundary_rows))
         if amr["levels"]:
             level_blocks = []
             for level in amr["levels"]:
@@ -1163,6 +1245,13 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.piecewise_tanh_transition_width.setValue(domain.piecewise_tanh_transition_width)
         self.inflow_enabled.setChecked(domain.inflow_enabled); self.lin.setValue(domain.Lin)
         self.rayleigh_enabled.setChecked(domain.rayleigh_enabled); self.rayleigh_depth.setValue(domain.rayleigh_depth)
+        self.rayleigh_dampcoef.setValue(domain.rayleigh_dampcoef)
+        rayleigh_representation_index = self.rayleigh_representation.findData(
+            domain.rayleigh_representation
+        )
+        self.rayleigh_representation.setCurrentIndex(max(0, rayleigh_representation_index))
+        self.rayleigh_opacity.setValue(round(100.0 * domain.rayleigh_opacity))
+        self._update_boundary_controls()
         self.max_level.setValue(domain.max_level if domain.vertical_discretization == "uniform" else 0)
         self.rotor_diameter.setValue(study.rotor_diameter)
         self.hub_height.setValue(study.hub_height)
