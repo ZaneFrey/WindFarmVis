@@ -22,7 +22,7 @@ The application is intended for planning domain dimensions, numerical resolution
 
 FarmVis provides three native windows:
 
-1. **Control panel** — organizes inputs into **Domain**, **Boundary Conditions**, **Wind Farm**, **AMR**, and **Presets** tabs, with validation messages, summaries, and actions available below every tab.
+1. **Control panel** — organizes inputs into **Domain**, **Boundary Conditions**, **Sounding**, **Wind Farm**, **AMR**, and **Presets** tabs, with validation messages, summaries, and actions available below every tab.
 2. **3D domain view** — an interactive PyVista window for rotating, panning, and zooming around the domain.
 3. **2D views** — a tabbed window containing the `x-y`, `x-z`, and `y-z` projections.
 
@@ -112,13 +112,14 @@ The `--prune` option removes packages that are no longer declared by the environ
 1. Launch `farmvis_gui.py` from the activated `farmvis` environment.
 2. Set the domain dimensions and base-grid resolution in the **Domain** tab.
 3. Configure the optional inflow and Rayleigh regions in the **Boundary Conditions** tab.
-4. Set the turbine model dimensions and define one or more clusters in the **Wind Farm** tab.
-5. Configure any nested refinement boxes in the **AMR** tab.
-6. Click **Update Visualizations**.
-7. Inspect validation warnings and numerical summaries in the control panel.
-8. Rotate and inspect the native 3D view, then review the three 2D projections.
-9. Save the configuration as a JSON preset from the **Presets** tab if it will be reused.
-10. Click **Export Coordinates** to generate the turbine-coordinate input file.
+4. Design the initial thermodynamic and velocity profiles in the **Sounding** tab.
+5. Set the turbine model dimensions and define one or more clusters in the **Wind Farm** tab.
+6. Configure any nested refinement boxes in the **AMR** tab.
+7. Click **Update Visualizations**.
+8. Inspect validation warnings and numerical summaries in the control panel.
+9. Rotate and inspect the native 3D view, then review the three 2D projections.
+10. Save the configuration as a JSON preset from the **Presets** tab if it will be reused.
+11. Click **Export Coordinates** to generate the turbine-coordinate input file.
 
 Changing a control does not immediately rebuild the visualization. Click **Update Visualizations** after making changes.
 
@@ -263,6 +264,43 @@ z = [L_z - depth, L_z]
 ```
 
 It remains inside `L_z`; it does not increase the domain height. Uniform and Functional visualizations use only the four exterior side faces, with no top face, interior lower face, or filled volume. The vertical 2D projections continue to show the corresponding side boundary segments.
+
+## Sounding
+
+The **Sounding** tab designs an idealized neutral-boundary-layer initial sounding. No sounding plot opens at startup. Use the two buttons in the tab to open independent, interactive Matplotlib windows for potential temperature and wind speed. The optional capping-inversion outline is the only sounding element shown in the 3D domain visualization.
+
+### Potential Temperature
+
+The thermodynamic profile is specified by surface potential temperature `theta_surface` (default `288 K`), the base height `z_i` and thickness `Delta z_c` of the capping inversion, inversion difference `Delta theta`, and free-tropospheric lapse rate `Gamma` in K/km:
+
+```text
+theta(z) = theta_surface
+    for z <= z_i
+
+theta(z) = theta_surface + Delta theta (z - z_i) / Delta z_c
+    for z_i < z < z_i + Delta z_c
+
+theta(z) = theta_surface + Delta theta
+           + Gamma (z - z_i - Delta z_c) / 1000
+    for z >= z_i + Delta z_c
+```
+
+Enable **Show capping inversion height in 3D** to draw a tightly dashed orange perimeter at `z_i` around the complete solved-domain footprint, including the inflow region.
+
+### Velocity
+
+`G` is the geostrophic wind speed. The **Wind speed profile** button plots the initialized wind-speed magnitude.
+
+- **Uniform** — sets the wind speed to `G` at every height.
+- **Log-law** — uses the surface roughness `z_0`, is zero at and below `z_0`, increases logarithmically to `G` at `z_i`, and remains `G` above `z_i`:
+
+```text
+U(z) = G log(z / z_0) / log(z_i / z_0)  for z_0 < z < z_i
+U(z) = 0                                 for z <= z_0
+U(z) = G                                 for z >= z_i
+```
+
+The `z_0` input is shown only when **Log-law** is selected. Sounding settings are included in saved presets; older presets receive the documented defaults.
 
 ## AMR Controls
 

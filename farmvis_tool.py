@@ -57,6 +57,15 @@ class DomainConfig:
     spanwise_sponge_thickness: float = 500.0
     spanwise_sponge_representation: str = "uniform"
     spanwise_sponge_opacity: float = 0.15
+    sounding_zi: float = 750.0
+    sounding_inversion_thickness: float = 100.0
+    sounding_surface_theta: float = 288.0
+    sounding_delta_theta: float = 8.0
+    sounding_lapse_rate: float = 3.0
+    sounding_geostrophic_wind: float = 10.0
+    sounding_velocity_profile: str = "uniform"
+    sounding_z0: float = 0.1
+    sounding_show_inversion: bool = False
     max_level: int = 0
     amr_levels: list["AMRLevelConfig"] = field(default_factory=list)
 
@@ -432,6 +441,77 @@ def compute_vertical_grid_profile(domain_config: DomainConfig) -> dict[str, Any]
     }
 
 
+def compute_sounding_profiles(
+    domain_config: DomainConfig,
+    point_count: int = 401,
+) -> dict[str, np.ndarray | str]:
+    """Construct idealized neutral-boundary-layer thermodynamic and wind profiles."""
+    _ensure_positive(domain_config.sounding_zi, "sounding_zi")
+    if domain_config.sounding_zi > domain_config.Lz:
+        raise ValueError("sounding_zi cannot exceed Lz")
+    _ensure_positive(domain_config.sounding_inversion_thickness, "sounding_inversion_thickness")
+    inversion_top = domain_config.sounding_zi + domain_config.sounding_inversion_thickness
+    if inversion_top > domain_config.Lz:
+        raise ValueError("sounding_zi + sounding_inversion_thickness cannot exceed Lz")
+    _ensure_positive(domain_config.sounding_surface_theta, "sounding_surface_theta")
+    _ensure_nonnegative(domain_config.sounding_delta_theta, "sounding_delta_theta")
+    _ensure_nonnegative(domain_config.sounding_lapse_rate, "sounding_lapse_rate")
+    _ensure_nonnegative(domain_config.sounding_geostrophic_wind, "sounding_geostrophic_wind")
+
+    velocity_mode = domain_config.sounding_velocity_profile.strip().lower().replace("-", "_")
+    if velocity_mode not in {"uniform", "log_law"}:
+        raise ValueError("sounding_velocity_profile must be 'uniform' or 'log_law'")
+    if velocity_mode == "log_law":
+        _ensure_positive(domain_config.sounding_z0, "sounding_z0")
+        if domain_config.sounding_z0 >= domain_config.sounding_zi:
+            raise ValueError("sounding_z0 must be less than sounding_zi for a log-law profile")
+
+    z = np.unique(
+        np.concatenate(
+            [
+                np.linspace(0.0, domain_config.Lz, max(2, point_count)),
+                np.asarray([domain_config.sounding_zi, inversion_top]),
+            ]
+        )
+    )
+    zi = domain_config.sounding_zi
+    theta = np.full_like(z, domain_config.sounding_surface_theta)
+    inversion = (z > zi) & (z < inversion_top)
+    theta[inversion] += (
+        domain_config.sounding_delta_theta
+        * (z[inversion] - zi)
+        / domain_config.sounding_inversion_thickness
+    )
+    above_inversion = z >= inversion_top
+    theta[above_inversion] += domain_config.sounding_delta_theta + (
+        domain_config.sounding_lapse_rate * (z[above_inversion] - inversion_top) / 1000.0
+    )
+
+    geostrophic = np.full_like(z, domain_config.sounding_geostrophic_wind)
+    if velocity_mode == "uniform":
+        u_velocity = geostrophic.copy()
+    else:
+        u_velocity = np.zeros_like(z)
+        above_roughness = z > domain_config.sounding_z0
+        denominator = math.log(zi / domain_config.sounding_z0)
+        u_velocity[above_roughness] = (
+            domain_config.sounding_geostrophic_wind
+            * np.log(z[above_roughness] / domain_config.sounding_z0)
+            / denominator
+        )
+        u_velocity = np.clip(u_velocity, 0.0, domain_config.sounding_geostrophic_wind)
+        u_velocity[z >= zi] = domain_config.sounding_geostrophic_wind
+
+    return {
+        "temperature_z": z,
+        "theta": theta,
+        "velocity_z": z,
+        "wind_speed": u_velocity,
+        "geostrophic": geostrophic,
+        "velocity_mode": velocity_mode,
+    }
+
+
 def export_vertical_grid_levels(domain_config: DomainConfig, path: str | Path) -> Path:
     """Write all vertical edge levels as one space-separated row."""
     target = Path(path)
@@ -755,6 +835,15 @@ def serialize_configs(
             "spanwise_sponge_thickness": domain_config.spanwise_sponge_thickness,
             "spanwise_sponge_representation": domain_config.spanwise_sponge_representation,
             "spanwise_sponge_opacity": domain_config.spanwise_sponge_opacity,
+            "sounding_zi": domain_config.sounding_zi,
+            "sounding_inversion_thickness": domain_config.sounding_inversion_thickness,
+            "sounding_surface_theta": domain_config.sounding_surface_theta,
+            "sounding_delta_theta": domain_config.sounding_delta_theta,
+            "sounding_lapse_rate": domain_config.sounding_lapse_rate,
+            "sounding_geostrophic_wind": domain_config.sounding_geostrophic_wind,
+            "sounding_velocity_profile": domain_config.sounding_velocity_profile,
+            "sounding_z0": domain_config.sounding_z0,
+            "sounding_show_inversion": domain_config.sounding_show_inversion,
             "max_level": domain_config.max_level,
             "amr_levels": [
                 {
@@ -909,6 +998,19 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
             domain_data.get("spanwise_sponge_representation", "uniform")
         ),
         spanwise_sponge_opacity=float(domain_data.get("spanwise_sponge_opacity", 0.15)),
+        sounding_zi=float(domain_data.get("sounding_zi", 750.0)),
+        sounding_inversion_thickness=float(
+            domain_data.get("sounding_inversion_thickness", 100.0)
+        ),
+        sounding_surface_theta=float(domain_data.get("sounding_surface_theta", 288.0)),
+        sounding_delta_theta=float(domain_data.get("sounding_delta_theta", 8.0)),
+        sounding_lapse_rate=float(domain_data.get("sounding_lapse_rate", 3.0)),
+        sounding_geostrophic_wind=float(domain_data.get("sounding_geostrophic_wind", 10.0)),
+        sounding_velocity_profile=str(
+            domain_data.get("sounding_velocity_profile", "uniform")
+        ).strip().lower().replace("-", "_"),
+        sounding_z0=float(domain_data.get("sounding_z0", 0.1)),
+        sounding_show_inversion=bool(domain_data.get("sounding_show_inversion", False)),
         max_level=int(domain_data.get("max_level", 0)),
         amr_levels=[
             AMRLevelConfig(
@@ -1123,6 +1225,34 @@ def populate_3d_scene(
         )
     else:
         plotter.remove_actor("inflow-region", reset_camera=False, render=False)
+
+    full_bounds = metrics["domain_bounds"]["full"]
+    if (
+        domain_config.sounding_show_inversion
+        and 0.0 < domain_config.sounding_zi <= full_bounds[5]
+    ):
+        inversion_outline_bounds = (
+            full_bounds[0],
+            full_bounds[1],
+            full_bounds[2],
+            full_bounds[3],
+            domain_config.sounding_zi,
+            domain_config.sounding_zi,
+        )
+        plotter.add_mesh(
+            _dashed_rayleigh_base_polydata(
+                inversion_outline_bounds,
+                dash_fraction=0.025,
+                gap_fraction=0.015,
+            ),
+            color="darkorange",
+            line_width=2,
+            name="sounding-inversion-height",
+        )
+    else:
+        plotter.remove_actor(
+            "sounding-inversion-height", reset_camera=False, render=False
+        )
 
     rayleigh_bounds = metrics["domain_bounds"]["rayleigh"]
     if rayleigh_bounds is not None:
@@ -2071,6 +2201,7 @@ __all__ = [
     "compute_amr_metrics",
     "configs_from_preset",
     "compute_grid_metrics",
+    "compute_sounding_profiles",
     "compute_vertical_grid_profile",
     "export_cluster_coordinates",
     "export_vertical_grid_levels",

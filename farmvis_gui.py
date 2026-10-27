@@ -26,6 +26,7 @@ from farmvis_tool import (
     FarmStudyConfig,
     compute_amr_metrics,
     compute_grid_metrics,
+    compute_sounding_profiles,
     compute_vertical_grid_profile,
     configs_from_preset,
     export_cluster_coordinates,
@@ -135,6 +136,47 @@ class VerticalGridWindow(QtWidgets.QMainWindow):
         ax.set_xlim(0.0, x_limit)
         ax.set_ylim(0.0, domain.Lz)
         ax.set_axisbelow(True)
+        self.canvas.figure.tight_layout()
+        self.canvas.draw_idle()
+
+
+class SoundingProfileWindow(QtWidgets.QMainWindow):
+    def __init__(self, window_title: str) -> None:
+        super().__init__()
+        self.setWindowTitle(window_title)
+        self.resize(620, 760)
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(container)
+        self.canvas = FigureCanvasQTAgg(plt.Figure())
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.canvas)
+        self.setCentralWidget(container)
+
+    def update_profile(
+        self,
+        values: np.ndarray,
+        heights: np.ndarray,
+        x_label: str,
+        plot_title: str,
+        inversion_height: float,
+    ) -> None:
+        self.canvas.figure.clear()
+        ax = self.canvas.figure.add_subplot(111)
+        ax.plot(values, heights, color="black", linewidth=2.0)
+        ax.axhline(
+            inversion_height,
+            color="tab:red",
+            linestyle="--",
+            linewidth=1.0,
+            label=r"$z_i$",
+        )
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(r"$z$ (m)")
+        ax.set_title(plot_title)
+        ax.set_ylim(0.0, max(float(np.max(heights)), 1.0))
+        ax.grid(True, linestyle=":", linewidth=0.5)
+        ax.legend(loc="best")
         self.canvas.figure.tight_layout()
         self.canvas.draw_idle()
 
@@ -253,6 +295,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.camera_control_dialog: CameraControlDialog | None = None
         self.two_d_window = TwoDWindow()
         self.vertical_grid_window: VerticalGridWindow | None = None
+        self.sounding_profile_windows: dict[str, SoundingProfileWindow] = {}
 
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
@@ -281,6 +324,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.panel_splitter.addWidget(self.control_tabs)
         self._build_domain_controls()
         self._build_boundary_conditions_controls()
+        self._build_sounding_controls()
         self._build_farm_controls()
         self._build_amr_controls()
         self._build_preset_controls()
@@ -637,6 +681,94 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             and self.rayleigh_representation.currentData() in {"uniform", "functional"}
         )
 
+    def _build_sounding_controls(self) -> None:
+        layout = self._control_tab("Sounding")
+
+        temperature_group = QtWidgets.QGroupBox("Potential Temperature")
+        temperature_layout = QtWidgets.QVBoxLayout(temperature_group)
+        self.sounding_zi = self._float(750.0, minimum=0.001, step=50.0)
+        self.sounding_inversion_thickness = self._float(100.0, minimum=0.001, step=10.0)
+        self.sounding_surface_theta = self._float(288.0, minimum=0.001, step=1.0)
+        self.sounding_delta_theta = self._float(8.0, minimum=0.0, step=0.5)
+        self.sounding_lapse_rate = self._float(3.0, minimum=0.0, step=0.5)
+        temperature_layout.addWidget(
+            self._form_row(
+                ("z_i (m)", self.sounding_zi),
+                ("Δz_c (m)", self.sounding_inversion_thickness),
+                ("Surface θ (K)", self.sounding_surface_theta),
+            )
+        )
+        temperature_layout.addWidget(
+            self._form_row(
+                ("Δθ (K)", self.sounding_delta_theta),
+                ("Γ (K/km)", self.sounding_lapse_rate),
+            )
+        )
+        self.sounding_show_inversion = QtWidgets.QCheckBox(
+            "Show capping inversion height in 3D"
+        )
+        temperature_layout.addWidget(self.sounding_show_inversion)
+        temperature_note = QtWidgets.QLabel(
+            "Below z_i, theta equals the surface value (neutral boundary layer). "
+            "Delta theta is applied linearly across Delta z_c; above the inversion, "
+            "Gamma sets the lapse rate."
+        )
+        temperature_note.setWordWrap(True)
+        temperature_layout.addWidget(temperature_note)
+        layout.addWidget(temperature_group)
+
+        velocity_group = QtWidgets.QGroupBox("Velocity")
+        velocity_layout = QtWidgets.QVBoxLayout(velocity_group)
+        self.sounding_geostrophic_wind = self._float(10.0, minimum=0.0, step=1.0)
+        self.sounding_velocity_profile = QtWidgets.QComboBox()
+        self.sounding_velocity_profile.addItem("Uniform", "uniform")
+        self.sounding_velocity_profile.addItem("Log-law", "log_law")
+        self.sounding_z0 = QtWidgets.QDoubleSpinBox()
+        self.sounding_z0.setRange(0.000001, 1_000_000.0)
+        self.sounding_z0.setDecimals(6)
+        self.sounding_z0.setSingleStep(0.01)
+        self.sounding_z0.setValue(0.1)
+        velocity_layout.addWidget(
+            self._form_row(
+                ("G (m/s)", self.sounding_geostrophic_wind),
+                ("Velocity profile", self.sounding_velocity_profile),
+            )
+        )
+        self.sounding_z0_row = self._form_row(("z₀ (m)", self.sounding_z0))
+        velocity_layout.addWidget(self.sounding_z0_row)
+        velocity_note = QtWidgets.QLabel(
+            "The initialized wind-speed magnitude follows the selected profile and "
+            "reaches the geostrophic speed G at z_i."
+        )
+        velocity_note.setWordWrap(True)
+        velocity_layout.addWidget(velocity_note)
+        layout.addWidget(velocity_group)
+
+        plot_buttons = QtWidgets.QGridLayout()
+        for column, (label, profile_name) in enumerate(
+            (
+                ("Temperature profile", "temperature"),
+                ("Wind speed profile", "wind_speed"),
+            )
+        ):
+            button = QtWidgets.QPushButton(label)
+            button.clicked.connect(
+                lambda _checked=False, name=profile_name: self.plot_sounding_profile(name)
+            )
+            plot_buttons.addWidget(button, 0, column)
+        layout.addLayout(plot_buttons)
+        layout.addStretch(1)
+
+        self.sounding_velocity_profile.currentIndexChanged.connect(
+            self._update_sounding_controls
+        )
+        self._update_sounding_controls()
+
+    def _update_sounding_controls(self, _index: int | None = None) -> None:
+        self.sounding_z0_row.setVisible(
+            self.sounding_velocity_profile.currentData() == "log_law"
+        )
+
     def _build_amr_controls(self) -> None:
         layout = self._control_tab("AMR")
         self.max_level = self._int(0, minimum=0, maximum=10)
@@ -951,6 +1083,15 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             spanwise_sponge_thickness=self.spanwise_sponge_thickness.value(),
             spanwise_sponge_representation=self.spanwise_sponge_representation.currentData(),
             spanwise_sponge_opacity=self.spanwise_sponge_opacity.value() / 100.0,
+            sounding_zi=self.sounding_zi.value(),
+            sounding_inversion_thickness=self.sounding_inversion_thickness.value(),
+            sounding_surface_theta=self.sounding_surface_theta.value(),
+            sounding_delta_theta=self.sounding_delta_theta.value(),
+            sounding_lapse_rate=self.sounding_lapse_rate.value(),
+            sounding_geostrophic_wind=self.sounding_geostrophic_wind.value(),
+            sounding_velocity_profile=self.sounding_velocity_profile.currentData(),
+            sounding_z0=self.sounding_z0.value(),
+            sounding_show_inversion=self.sounding_show_inversion.isChecked(),
             max_level=self.max_level.value(),
             amr_levels=[AMRLevelConfig(level_index=index, **self._editor_values(editor)) for index, editor in enumerate(self.amr_editors, start=1)],
         )
@@ -1122,6 +1263,22 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             if domain.rayleigh_representation.strip().lower() != "dashed":
                 boundary_rows.append(("Maximum opacity", f"{domain.rayleigh_opacity:.2f}"))
         blocks.append(table("Boundary Conditions", boundary_rows))
+        sounding_rows = [
+            ("Inversion height z_i (m)", domain.sounding_zi),
+            ("Inversion thickness Delta z_c (m)", domain.sounding_inversion_thickness),
+            ("Surface theta (K)", domain.sounding_surface_theta),
+            ("Inversion Delta theta (K)", domain.sounding_delta_theta),
+            ("Free-tropospheric Gamma (K/km)", domain.sounding_lapse_rate),
+            ("Geostrophic wind G (m/s)", domain.sounding_geostrophic_wind),
+            ("Velocity profile", domain.sounding_velocity_profile.replace("_", " ").title()),
+            (
+                "3D inversion-height outline",
+                "Shown" if domain.sounding_show_inversion else "Hidden",
+            ),
+        ]
+        if domain.sounding_velocity_profile.strip().lower().replace("-", "_") == "log_law":
+            sounding_rows.append(("Surface roughness z_0 (m)", domain.sounding_z0))
+        blocks.append(table("Sounding", sounding_rows))
         if amr["levels"]:
             level_blocks = []
             for level in amr["levels"]:
@@ -1266,6 +1423,46 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             self.vertical_grid_window.activateWindow()
         except Exception as error:
             QtWidgets.QMessageBox.critical(self, "Vertical grid plot failed", str(error))
+
+    def plot_sounding_profile(self, profile_name: str) -> None:
+        profile_specs = {
+            "temperature": (
+                "Temperature Profile",
+                "temperature_z",
+                "theta",
+                r"$\theta$ (K)",
+                "Potential Temperature Profile",
+            ),
+            "wind_speed": (
+                "Wind Speed Profile",
+                "velocity_z",
+                "wind_speed",
+                r"Wind speed (m/s)",
+                "Wind Speed Profile",
+            ),
+        }
+        if profile_name not in profile_specs:
+            raise ValueError(f"Unknown sounding profile: {profile_name}")
+        try:
+            domain = self._build_domain_config()
+            profiles = compute_sounding_profiles(domain)
+            window_title, z_key, value_key, x_label, plot_title = profile_specs[profile_name]
+            window = self.sounding_profile_windows.get(profile_name)
+            if window is None:
+                window = SoundingProfileWindow(window_title)
+                self.sounding_profile_windows[profile_name] = window
+            window.update_profile(
+                np.asarray(profiles[value_key]),
+                np.asarray(profiles[z_key]),
+                x_label,
+                plot_title,
+                domain.sounding_zi,
+            )
+            window.showNormal()
+            window.raise_()
+            window.activateWindow()
+        except Exception as error:
+            QtWidgets.QMessageBox.critical(self, "Sounding plot failed", str(error))
 
     def save_grid_levels(self) -> None:
         output, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -1421,6 +1618,19 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         )
         self.spanwise_sponge_opacity.setValue(round(100.0 * domain.spanwise_sponge_opacity))
         self._update_boundary_controls()
+        self.sounding_zi.setValue(domain.sounding_zi)
+        self.sounding_inversion_thickness.setValue(domain.sounding_inversion_thickness)
+        self.sounding_surface_theta.setValue(domain.sounding_surface_theta)
+        self.sounding_delta_theta.setValue(domain.sounding_delta_theta)
+        self.sounding_lapse_rate.setValue(domain.sounding_lapse_rate)
+        self.sounding_geostrophic_wind.setValue(domain.sounding_geostrophic_wind)
+        sounding_velocity_index = self.sounding_velocity_profile.findData(
+            domain.sounding_velocity_profile
+        )
+        self.sounding_velocity_profile.setCurrentIndex(max(0, sounding_velocity_index))
+        self.sounding_z0.setValue(domain.sounding_z0)
+        self.sounding_show_inversion.setChecked(domain.sounding_show_inversion)
+        self._update_sounding_controls()
         self.max_level.setValue(domain.max_level if domain.vertical_discretization == "uniform" else 0)
         self.rotor_diameter.setValue(study.rotor_diameter)
         self.hub_height.setValue(study.hub_height)
@@ -1447,6 +1657,8 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.two_d_window.close()
         if self.vertical_grid_window is not None:
             self.vertical_grid_window.close()
+        for window in self.sounding_profile_windows.values():
+            window.close()
         event.accept()
 
 
