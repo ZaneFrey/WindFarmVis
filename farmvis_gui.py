@@ -506,6 +506,33 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.inflow_enabled.setChecked(True)
         self.lin = self._float(2000.0, minimum=0.0, step=100.0)
         inflow_layout.addWidget(self._form_row(("", self.inflow_enabled), ("L_in (m)", self.lin)))
+        self.inflow_sponge_enabled = QtWidgets.QCheckBox("Enable sponge region")
+        self.inflow_sponge_thickness = self._float(500.0, minimum=0.001, step=50.0)
+        self.inflow_sponge_thickness.setToolTip(
+            "Thickness inward from the solved domain's low-x face (erf.xlo_sponge_end)."
+        )
+        self.inflow_sponge_representation = QtWidgets.QComboBox()
+        self.inflow_sponge_representation.addItem("Uniform", "uniform")
+        self.inflow_sponge_representation.addItem("Dashed", "dashed")
+        self.inflow_sponge_opacity = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.inflow_sponge_opacity.setRange(0, 100)
+        self.inflow_sponge_opacity.setValue(15)
+        self.inflow_sponge_opacity.setToolTip("3D sponge-volume opacity from 0 to 1.")
+        self.inflow_sponge_opacity_value = QtWidgets.QLabel("0.15")
+        self.inflow_sponge_parameter_row = self._form_row(
+            ("Sponge thickness (m)", self.inflow_sponge_thickness)
+        )
+        self.inflow_sponge_representation_row = self._form_row(
+            ("3D representation", self.inflow_sponge_representation)
+        )
+        self.inflow_sponge_opacity_row = self._form_row(
+            ("Opacity", self.inflow_sponge_opacity),
+            ("", self.inflow_sponge_opacity_value),
+        )
+        inflow_layout.addWidget(self.inflow_sponge_enabled)
+        inflow_layout.addWidget(self.inflow_sponge_parameter_row)
+        inflow_layout.addWidget(self.inflow_sponge_representation_row)
+        inflow_layout.addWidget(self.inflow_sponge_opacity_row)
         layout.addWidget(inflow_group)
 
         (
@@ -580,6 +607,13 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         top_layout.addWidget(self.rayleigh_opacity_row)
         layout.addWidget(top_group)
         self.inflow_enabled.toggled.connect(self._update_boundary_controls)
+        self.inflow_sponge_enabled.toggled.connect(self._update_boundary_controls)
+        self.inflow_sponge_representation.currentIndexChanged.connect(
+            self._update_boundary_controls
+        )
+        self.inflow_sponge_opacity.valueChanged.connect(
+            lambda value: self.inflow_sponge_opacity_value.setText(f"{value / 100.0:.2f}")
+        )
         self.outflow_sponge_enabled.toggled.connect(self._update_boundary_controls)
         self.outflow_sponge_representation.currentIndexChanged.connect(
             self._update_boundary_controls
@@ -645,6 +679,14 @@ class FarmVisWindow(QtWidgets.QMainWindow):
     def _update_boundary_controls(self, _value: object | None = None) -> None:
         self.lin.setEnabled(self.inflow_enabled.isChecked())
         for enabled, thickness, representation, parameter_row, representation_row, opacity_row in (
+            (
+                self.inflow_sponge_enabled,
+                self.inflow_sponge_thickness,
+                self.inflow_sponge_representation,
+                self.inflow_sponge_parameter_row,
+                self.inflow_sponge_representation_row,
+                self.inflow_sponge_opacity_row,
+            ),
             (
                 self.outflow_sponge_enabled,
                 self.outflow_sponge_thickness,
@@ -1071,6 +1113,10 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             piecewise_tanh_transition_height=self.piecewise_tanh_transition_height.value(),
             piecewise_tanh_transition_width=self.piecewise_tanh_transition_width.value(),
             inflow_enabled=self.inflow_enabled.isChecked(), Lin=self.lin.value(),
+            inflow_sponge_enabled=self.inflow_sponge_enabled.isChecked(),
+            inflow_sponge_thickness=self.inflow_sponge_thickness.value(),
+            inflow_sponge_representation=self.inflow_sponge_representation.currentData(),
+            inflow_sponge_opacity=self.inflow_sponge_opacity.value() / 100.0,
             rayleigh_enabled=self.rayleigh_enabled.isChecked(), rayleigh_depth=self.rayleigh_depth.value(),
             rayleigh_dampcoef=self.rayleigh_dampcoef.value(),
             rayleigh_representation=self.rayleigh_representation.currentData(),
@@ -1221,6 +1267,20 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         ]
         if domain.inflow_enabled:
             boundary_rows.append(("Inflow length L_in (m)", domain.Lin))
+        boundary_rows.append(
+            ("Inflow sponge", "Enabled" if domain.inflow_sponge_enabled else "Disabled")
+        )
+        if domain.inflow_sponge_enabled:
+            boundary_rows.extend(
+                [
+                    ("Inflow sponge thickness (m)", domain.inflow_sponge_thickness),
+                    ("Inflow 3D representation", domain.inflow_sponge_representation.title()),
+                ]
+            )
+            if domain.inflow_sponge_representation.strip().lower() != "dashed":
+                boundary_rows.append(
+                    ("Inflow sponge opacity", f"{domain.inflow_sponge_opacity:.2f}")
+                )
         boundary_rows.append(
             ("Outflow sponge", "Enabled" if domain.outflow_sponge_enabled else "Disabled")
         )
@@ -1592,6 +1652,15 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.piecewise_tanh_transition_height.setValue(domain.piecewise_tanh_transition_height)
         self.piecewise_tanh_transition_width.setValue(domain.piecewise_tanh_transition_width)
         self.inflow_enabled.setChecked(domain.inflow_enabled); self.lin.setValue(domain.Lin)
+        self.inflow_sponge_enabled.setChecked(domain.inflow_sponge_enabled)
+        self.inflow_sponge_thickness.setValue(domain.inflow_sponge_thickness)
+        inflow_sponge_representation_index = self.inflow_sponge_representation.findData(
+            domain.inflow_sponge_representation
+        )
+        self.inflow_sponge_representation.setCurrentIndex(
+            max(0, inflow_sponge_representation_index)
+        )
+        self.inflow_sponge_opacity.setValue(round(100.0 * domain.inflow_sponge_opacity))
         self.rayleigh_enabled.setChecked(domain.rayleigh_enabled); self.rayleigh_depth.setValue(domain.rayleigh_depth)
         self.rayleigh_dampcoef.setValue(domain.rayleigh_dampcoef)
         rayleigh_representation_index = self.rayleigh_representation.findData(

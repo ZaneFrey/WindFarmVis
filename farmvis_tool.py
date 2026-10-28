@@ -44,6 +44,10 @@ class DomainConfig:
     piecewise_tanh_transition_width: float = 500.0
     inflow_enabled: bool = False
     Lin: float = 0.0
+    inflow_sponge_enabled: bool = False
+    inflow_sponge_thickness: float = 500.0
+    inflow_sponge_representation: str = "uniform"
+    inflow_sponge_opacity: float = 0.15
     rayleigh_enabled: bool = False
     rayleigh_depth: float = 0.0
     rayleigh_dampcoef: float = 0.2
@@ -128,6 +132,16 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             raise ValueError("rayleigh_opacity must be between 0 and 1")
 
     solved_x_length = domain_config.Lx + inflow_length
+    if domain_config.inflow_sponge_enabled:
+        _validate_sponge_visualization(
+            domain_config.inflow_sponge_thickness,
+            domain_config.inflow_sponge_representation,
+            domain_config.inflow_sponge_opacity,
+            "inflow_sponge",
+        )
+        if domain_config.inflow_sponge_thickness > solved_x_length:
+            raise ValueError("inflow_sponge_thickness cannot exceed the solved x length")
+
     if domain_config.outflow_sponge_enabled:
         _validate_sponge_visualization(
             domain_config.outflow_sponge_thickness,
@@ -313,6 +327,16 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 effective_height,
             )
             if domain_config.rayleigh_enabled and domain_config.rayleigh_depth > 0.0
+            else None,
+            "inflow_sponge": (
+                -inflow_length,
+                -inflow_length + domain_config.inflow_sponge_thickness,
+                0.0,
+                domain_config.Ly,
+                0.0,
+                effective_height,
+            )
+            if domain_config.inflow_sponge_enabled
             else None,
             "outflow_sponge": (
                 domain_config.Lx - domain_config.outflow_sponge_thickness,
@@ -822,6 +846,10 @@ def serialize_configs(
             "piecewise_tanh_transition_width": domain_config.piecewise_tanh_transition_width,
             "inflow_enabled": domain_config.inflow_enabled,
             "Lin": domain_config.Lin,
+            "inflow_sponge_enabled": domain_config.inflow_sponge_enabled,
+            "inflow_sponge_thickness": domain_config.inflow_sponge_thickness,
+            "inflow_sponge_representation": domain_config.inflow_sponge_representation,
+            "inflow_sponge_opacity": domain_config.inflow_sponge_opacity,
             "rayleigh_enabled": domain_config.rayleigh_enabled,
             "rayleigh_depth": domain_config.rayleigh_depth,
             "rayleigh_dampcoef": domain_config.rayleigh_dampcoef,
@@ -981,6 +1009,12 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         ),
         inflow_enabled=bool(domain_data.get("inflow_enabled", False)),
         Lin=float(domain_data.get("Lin", 0.0)),
+        inflow_sponge_enabled=bool(domain_data.get("inflow_sponge_enabled", False)),
+        inflow_sponge_thickness=float(domain_data.get("inflow_sponge_thickness", 500.0)),
+        inflow_sponge_representation=str(
+            domain_data.get("inflow_sponge_representation", "uniform")
+        ),
+        inflow_sponge_opacity=float(domain_data.get("inflow_sponge_opacity", 0.15)),
         rayleigh_enabled=bool(domain_data.get("rayleigh_enabled", False)),
         rayleigh_depth=float(domain_data.get("rayleigh_depth", 0.0)),
         rayleigh_dampcoef=float(domain_data.get("rayleigh_dampcoef", 0.2)),
@@ -1288,12 +1322,31 @@ def populate_3d_scene(
         plotter.remove_actor("rayleigh-region", reset_camera=False, render=False)
 
     sponge_actor_names = (
+        "inflow-sponge",
         "outflow-sponge",
         "spanwise-sponge-low",
         "spanwise-sponge-high",
     )
     for actor_name in sponge_actor_names:
         plotter.remove_actor(actor_name, reset_camera=False, render=False)
+
+    inflow_sponge_bounds = metrics["domain_bounds"]["inflow_sponge"]
+    if inflow_sponge_bounds is not None:
+        if domain_config.inflow_sponge_representation.strip().lower() == "dashed":
+            plotter.add_mesh(
+                _dashed_face_polydata(inflow_sponge_bounds, axis="x", side="low"),
+                color="lightskyblue",
+                line_width=2,
+                name="inflow-sponge",
+            )
+        else:
+            plotter.add_mesh(
+                pv.Box(bounds=inflow_sponge_bounds),
+                color="lightskyblue",
+                opacity=domain_config.inflow_sponge_opacity,
+                show_edges=False,
+                name="inflow-sponge",
+            )
 
     outflow_sponge_bounds = metrics["domain_bounds"]["outflow_sponge"]
     if outflow_sponge_bounds is not None:

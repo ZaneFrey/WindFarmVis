@@ -212,6 +212,16 @@ x = [-L_in, L_x]
 
 The solved streamwise length used in the base-grid calculation is `L_in + L_x`. The inflow region is drawn as a dashed black box.
 
+The **Inflow boundary** group also configures ERF's low-x sponge (`erf.use_xlo_sponge_damping`). Enable **Enable sponge region** and enter the thickness measured inward from the solved domain's inflow face. Its visual start and end are:
+
+```text
+x_start,visual = -L_in  (when the inflow region is enabled), otherwise 0
+x_end,visual = x_start,visual + inflow_sponge_thickness
+erf.xlo_sponge_end = inflow_sponge_thickness
+```
+
+This places the sponge at the upstream edge of the optional inflow region instead of at the main-domain start. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the solved domain's low-x face. The opacity slider is available for the Uniform representation.
+
 ### Outflow sponge region
 
 The **Outflow boundary** group configures ERF's high-x sponge (`erf.use_xhi_sponge_damping`). Enable **Enable sponge region** and enter the sponge thickness measured inward from the outflow face. In FarmVis visual coordinates, and in ERF's solved-domain coordinates, the start locations are:
