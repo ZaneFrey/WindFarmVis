@@ -200,6 +200,8 @@ Starting at the ground, FarmVis evaluates this function at each cell's lower edg
 
 ## Boundary Conditions
 
+Each enabled sponge or Rayleigh region includes a **Color** dropdown with preset colors. The selection controls the outline color for Dashed representations and the region color for Uniform or Functional representations.
+
 ### Inflow region
 
 Enable **Enable inflow region** and enter `L_in` to prepend an upstream turbulence-generation region.
@@ -220,7 +222,7 @@ x_end,visual = x_start,visual + inflow_sponge_thickness
 erf.xlo_sponge_end = inflow_sponge_thickness
 ```
 
-This places the sponge at the upstream edge of the optional inflow region instead of at the main-domain start. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the solved domain's low-x face. The opacity slider is available for the Uniform representation.
+This places the sponge at the upstream edge of the optional inflow region instead of at the main-domain start. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the full sponge volume, including its inward edge, so the layer depth remains visible. The opacity slider is available for the Uniform representation.
 
 ### Outflow sponge region
 
@@ -231,7 +233,7 @@ x_start,visual = L_x - outflow_sponge_thickness
 erf.xhi_sponge_start = L_in + L_x - outflow_sponge_thickness
 ```
 
-The thickness may span the full solved x extent, including the inflow region. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** draws a dashed rectangle on the high-x domain face. The opacity slider is available for the Uniform representation.
+The thickness may span the full solved x extent, including the inflow region. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the full sponge volume, including its inward edge, so the layer depth remains visible. The opacity slider is available for the Uniform representation.
 
 ### Spanwise sponge regions
 
@@ -242,7 +244,7 @@ erf.ylo_sponge_end = spanwise_sponge_thickness
 erf.yhi_sponge_start = L_y - spanwise_sponge_thickness
 ```
 
-Each thickness may extend across the full `L_y`; thicknesses greater than half of `L_y` produce overlapping low-y and high-y sponge volumes, matching ERF's independent boundary switches. The sponge volumes span the full solved x extent, including the inflow region. **Uniform** draws two translucent interior volumes; **Dashed** outlines the two lateral domain faces. The opacity slider is available for the Uniform representation.
+Each thickness may extend across the full `L_y`; thicknesses greater than half of `L_y` produce overlapping low-y and high-y sponge volumes, matching ERF's independent boundary switches. The sponge volumes span the full solved x extent, including the inflow region. **Uniform** draws two translucent interior volumes; **Dashed** outlines both full sponge volumes, including their inward edges. The opacity slider is available for the Uniform representation.
 
 These regions follow ERF's volumetric sponge formulation `dQ/dt = RHS - A xi^n (Q - Q_target)`, where `xi` increases from zero at the inner edge of a sponge to one at its domain face. FarmVis currently describes the sponge geometry and its visualization; ERF's sponge strength and target-state inputs remain case-level solver settings.
 
@@ -295,7 +297,7 @@ theta(z) = theta_surface + Delta theta
     for z >= z_i + Delta z_c
 ```
 
-Enable **Show capping inversion height in 3D** to draw a tightly dashed orange perimeter at `z_i` around the complete solved-domain footprint, including the inflow region.
+Enable **Show capping inversion height in 3D** to draw a tightly broken line at `z_i` around the complete solved-domain footprint, including the inflow region. Its short dashes and gaps use one consistent physical scale on every edge to approximate a dotted line. When enabled, the accompanying **Color** dropdown controls the line color using the same presets as the boundary regions.
 
 ### Velocity
 

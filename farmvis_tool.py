@@ -12,6 +12,18 @@ import pyvista as pv
 from matplotlib.patches import Circle, Rectangle
 
 
+BOUNDARY_COLOR_PRESETS = (
+    ("Light blue", "lightskyblue"),
+    ("Light gray", "lightgray"),
+    ("Blue", "dodgerblue"),
+    ("Teal", "mediumturquoise"),
+    ("Green", "mediumseagreen"),
+    ("Orange", "darkorange"),
+    ("Purple", "mediumpurple"),
+    ("Red", "tomato"),
+)
+
+
 @dataclass(slots=True)
 class DomainConfig:
     Lx: float
@@ -48,19 +60,23 @@ class DomainConfig:
     inflow_sponge_thickness: float = 500.0
     inflow_sponge_representation: str = "uniform"
     inflow_sponge_opacity: float = 0.15
+    inflow_sponge_color: str = "lightskyblue"
     rayleigh_enabled: bool = False
     rayleigh_depth: float = 0.0
     rayleigh_dampcoef: float = 0.2
     rayleigh_representation: str = "uniform"
     rayleigh_opacity: float = 0.15
+    rayleigh_color: str = "lightgray"
     outflow_sponge_enabled: bool = False
     outflow_sponge_thickness: float = 500.0
     outflow_sponge_representation: str = "uniform"
     outflow_sponge_opacity: float = 0.15
+    outflow_sponge_color: str = "lightskyblue"
     spanwise_sponge_enabled: bool = False
     spanwise_sponge_thickness: float = 500.0
     spanwise_sponge_representation: str = "uniform"
     spanwise_sponge_opacity: float = 0.15
+    spanwise_sponge_color: str = "lightskyblue"
     sounding_zi: float = 750.0
     sounding_inversion_thickness: float = 100.0
     sounding_surface_theta: float = 288.0
@@ -70,6 +86,7 @@ class DomainConfig:
     sounding_velocity_profile: str = "uniform"
     sounding_z0: float = 0.1
     sounding_show_inversion: bool = False
+    sounding_inversion_color: str = "darkorange"
     max_level: int = 0
     amr_levels: list["AMRLevelConfig"] = field(default_factory=list)
 
@@ -119,6 +136,10 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
     inflow_length = domain_config.Lin if domain_config.inflow_enabled else 0.0
     if domain_config.inflow_enabled:
         _ensure_nonnegative(domain_config.Lin, "Lin")
+    if domain_config.sounding_show_inversion:
+        _validate_boundary_color(
+            domain_config.sounding_inversion_color, "sounding_inversion_color"
+        )
 
     if domain_config.rayleigh_enabled:
         _ensure_positive(domain_config.rayleigh_depth, "rayleigh_depth")
@@ -130,6 +151,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             )
         if not 0.0 <= domain_config.rayleigh_opacity <= 1.0:
             raise ValueError("rayleigh_opacity must be between 0 and 1")
+        _validate_boundary_color(domain_config.rayleigh_color, "rayleigh_color")
 
     solved_x_length = domain_config.Lx + inflow_length
     if domain_config.inflow_sponge_enabled:
@@ -138,6 +160,9 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             domain_config.inflow_sponge_representation,
             domain_config.inflow_sponge_opacity,
             "inflow_sponge",
+        )
+        _validate_boundary_color(
+            domain_config.inflow_sponge_color, "inflow_sponge_color"
         )
         if domain_config.inflow_sponge_thickness > solved_x_length:
             raise ValueError("inflow_sponge_thickness cannot exceed the solved x length")
@@ -149,6 +174,9 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             domain_config.outflow_sponge_opacity,
             "outflow_sponge",
         )
+        _validate_boundary_color(
+            domain_config.outflow_sponge_color, "outflow_sponge_color"
+        )
         if domain_config.outflow_sponge_thickness > solved_x_length:
             raise ValueError("outflow_sponge_thickness cannot exceed the solved x length")
 
@@ -158,6 +186,9 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             domain_config.spanwise_sponge_representation,
             domain_config.spanwise_sponge_opacity,
             "spanwise_sponge",
+        )
+        _validate_boundary_color(
+            domain_config.spanwise_sponge_color, "spanwise_sponge_color"
         )
         if domain_config.spanwise_sponge_thickness > domain_config.Ly:
             raise ValueError("spanwise_sponge_thickness cannot exceed Ly")
@@ -850,19 +881,23 @@ def serialize_configs(
             "inflow_sponge_thickness": domain_config.inflow_sponge_thickness,
             "inflow_sponge_representation": domain_config.inflow_sponge_representation,
             "inflow_sponge_opacity": domain_config.inflow_sponge_opacity,
+            "inflow_sponge_color": domain_config.inflow_sponge_color,
             "rayleigh_enabled": domain_config.rayleigh_enabled,
             "rayleigh_depth": domain_config.rayleigh_depth,
             "rayleigh_dampcoef": domain_config.rayleigh_dampcoef,
             "rayleigh_representation": domain_config.rayleigh_representation,
             "rayleigh_opacity": domain_config.rayleigh_opacity,
+            "rayleigh_color": domain_config.rayleigh_color,
             "outflow_sponge_enabled": domain_config.outflow_sponge_enabled,
             "outflow_sponge_thickness": domain_config.outflow_sponge_thickness,
             "outflow_sponge_representation": domain_config.outflow_sponge_representation,
             "outflow_sponge_opacity": domain_config.outflow_sponge_opacity,
+            "outflow_sponge_color": domain_config.outflow_sponge_color,
             "spanwise_sponge_enabled": domain_config.spanwise_sponge_enabled,
             "spanwise_sponge_thickness": domain_config.spanwise_sponge_thickness,
             "spanwise_sponge_representation": domain_config.spanwise_sponge_representation,
             "spanwise_sponge_opacity": domain_config.spanwise_sponge_opacity,
+            "spanwise_sponge_color": domain_config.spanwise_sponge_color,
             "sounding_zi": domain_config.sounding_zi,
             "sounding_inversion_thickness": domain_config.sounding_inversion_thickness,
             "sounding_surface_theta": domain_config.sounding_surface_theta,
@@ -872,6 +907,7 @@ def serialize_configs(
             "sounding_velocity_profile": domain_config.sounding_velocity_profile,
             "sounding_z0": domain_config.sounding_z0,
             "sounding_show_inversion": domain_config.sounding_show_inversion,
+            "sounding_inversion_color": domain_config.sounding_inversion_color,
             "max_level": domain_config.max_level,
             "amr_levels": [
                 {
@@ -1015,23 +1051,31 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
             domain_data.get("inflow_sponge_representation", "uniform")
         ),
         inflow_sponge_opacity=float(domain_data.get("inflow_sponge_opacity", 0.15)),
+        inflow_sponge_color=str(domain_data.get("inflow_sponge_color", "lightskyblue")),
         rayleigh_enabled=bool(domain_data.get("rayleigh_enabled", False)),
         rayleigh_depth=float(domain_data.get("rayleigh_depth", 0.0)),
         rayleigh_dampcoef=float(domain_data.get("rayleigh_dampcoef", 0.2)),
         rayleigh_representation=str(domain_data.get("rayleigh_representation", "uniform")),
         rayleigh_opacity=float(domain_data.get("rayleigh_opacity", 0.15)),
+        rayleigh_color=str(domain_data.get("rayleigh_color", "lightgray")),
         outflow_sponge_enabled=bool(domain_data.get("outflow_sponge_enabled", False)),
         outflow_sponge_thickness=float(domain_data.get("outflow_sponge_thickness", 500.0)),
         outflow_sponge_representation=str(
             domain_data.get("outflow_sponge_representation", "uniform")
         ),
         outflow_sponge_opacity=float(domain_data.get("outflow_sponge_opacity", 0.15)),
+        outflow_sponge_color=str(
+            domain_data.get("outflow_sponge_color", "lightskyblue")
+        ),
         spanwise_sponge_enabled=bool(domain_data.get("spanwise_sponge_enabled", False)),
         spanwise_sponge_thickness=float(domain_data.get("spanwise_sponge_thickness", 500.0)),
         spanwise_sponge_representation=str(
             domain_data.get("spanwise_sponge_representation", "uniform")
         ),
         spanwise_sponge_opacity=float(domain_data.get("spanwise_sponge_opacity", 0.15)),
+        spanwise_sponge_color=str(
+            domain_data.get("spanwise_sponge_color", "lightskyblue")
+        ),
         sounding_zi=float(domain_data.get("sounding_zi", 750.0)),
         sounding_inversion_thickness=float(
             domain_data.get("sounding_inversion_thickness", 100.0)
@@ -1045,6 +1089,9 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         ).strip().lower().replace("-", "_"),
         sounding_z0=float(domain_data.get("sounding_z0", 0.1)),
         sounding_show_inversion=bool(domain_data.get("sounding_show_inversion", False)),
+        sounding_inversion_color=str(
+            domain_data.get("sounding_inversion_color", "darkorange")
+        ),
         max_level=int(domain_data.get("max_level", 0)),
         amr_levels=[
             AMRLevelConfig(
@@ -1276,10 +1323,10 @@ def populate_3d_scene(
         plotter.add_mesh(
             _dashed_rayleigh_base_polydata(
                 inversion_outline_bounds,
-                dash_fraction=0.025,
-                gap_fraction=0.015,
+                dash_fraction=0.0125,
+                gap_fraction=0.0085,
             ),
-            color="darkorange",
+            color=domain_config.sounding_inversion_color,
             line_width=2,
             name="sounding-inversion-height",
         )
@@ -1296,6 +1343,7 @@ def populate_3d_scene(
                 _rayleigh_functional_surface_polydata(
                     rayleigh_bounds,
                     max_opacity=domain_config.rayleigh_opacity,
+                    color=domain_config.rayleigh_color,
                 ),
                 scalars="rayleigh_rgba",
                 rgba=True,
@@ -1306,14 +1354,14 @@ def populate_3d_scene(
         elif representation == "dashed":
             plotter.add_mesh(
                 _dashed_rayleigh_base_polydata(rayleigh_bounds),
-                color="lightgray",
+                color=domain_config.rayleigh_color,
                 line_width=2,
                 name="rayleigh-region",
             )
         else:
             plotter.add_mesh(
                 _rayleigh_surface_polydata(rayleigh_bounds),
-                color="lightgray",
+                color=domain_config.rayleigh_color,
                 opacity=domain_config.rayleigh_opacity,
                 show_edges=False,
                 name="rayleigh-region",
@@ -1334,15 +1382,15 @@ def populate_3d_scene(
     if inflow_sponge_bounds is not None:
         if domain_config.inflow_sponge_representation.strip().lower() == "dashed":
             plotter.add_mesh(
-                _dashed_face_polydata(inflow_sponge_bounds, axis="x", side="low"),
-                color="lightskyblue",
+                _dashed_box_polydata(inflow_sponge_bounds),
+                color=domain_config.inflow_sponge_color,
                 line_width=2,
                 name="inflow-sponge",
             )
         else:
             plotter.add_mesh(
                 pv.Box(bounds=inflow_sponge_bounds),
-                color="lightskyblue",
+                color=domain_config.inflow_sponge_color,
                 opacity=domain_config.inflow_sponge_opacity,
                 show_edges=False,
                 name="inflow-sponge",
@@ -1351,19 +1399,16 @@ def populate_3d_scene(
     outflow_sponge_bounds = metrics["domain_bounds"]["outflow_sponge"]
     if outflow_sponge_bounds is not None:
         if domain_config.outflow_sponge_representation.strip().lower() == "dashed":
-            outflow_sponge_mesh = _dashed_face_polydata(
-                outflow_sponge_bounds, axis="x", side="high"
-            )
             plotter.add_mesh(
-                outflow_sponge_mesh,
-                color="lightskyblue",
+                _dashed_box_polydata(outflow_sponge_bounds),
+                color=domain_config.outflow_sponge_color,
                 line_width=2,
                 name="outflow-sponge",
             )
         else:
             plotter.add_mesh(
                 pv.Box(bounds=outflow_sponge_bounds),
-                color="lightskyblue",
+                color=domain_config.outflow_sponge_color,
                 opacity=domain_config.outflow_sponge_opacity,
                 show_edges=False,
                 name="outflow-sponge",
@@ -1372,24 +1417,22 @@ def populate_3d_scene(
     spanwise_sponge_bounds = metrics["domain_bounds"]["spanwise_sponge"]
     if spanwise_sponge_bounds is not None:
         representation = domain_config.spanwise_sponge_representation.strip().lower()
-        for label, bounds, side in zip(
+        for label, bounds in zip(
             ("low", "high"),
             spanwise_sponge_bounds,
-            ("low", "high"),
             strict=True,
         ):
             if representation == "dashed":
-                mesh = _dashed_face_polydata(bounds, axis="y", side=side)
                 plotter.add_mesh(
-                    mesh,
-                    color="lightskyblue",
+                    _dashed_box_polydata(bounds),
+                    color=domain_config.spanwise_sponge_color,
                     line_width=2,
                     name=f"spanwise-sponge-{label}",
                 )
             else:
                 plotter.add_mesh(
                     pv.Box(bounds=bounds),
-                    color="lightskyblue",
+                    color=domain_config.spanwise_sponge_color,
                     opacity=domain_config.spanwise_sponge_opacity,
                     show_edges=False,
                     name=f"spanwise-sponge-{label}",
@@ -1632,6 +1675,7 @@ def rayleigh_damping_coefficient(
 def _rayleigh_functional_surface_polydata(
     bounds: tuple[float, float, float, float, float, float],
     max_opacity: float,
+    color: str = "lightgray",
     layer_count: int = 48,
 ) -> pv.PolyData:
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
@@ -1665,11 +1709,12 @@ def _rayleigh_functional_surface_polydata(
 
     mesh = pv.PolyData(np.asarray(points), np.asarray(faces, dtype=np.int64))
     alpha = np.rint(255.0 * np.asarray(opacity_values)).astype(np.uint8)
+    red, green, blue = pv.Color(color).int_rgb
     rgba = np.column_stack(
         [
-            np.full_like(alpha, 211),
-            np.full_like(alpha, 211),
-            np.full_like(alpha, 211),
+            np.full_like(alpha, red),
+            np.full_like(alpha, green),
+            np.full_like(alpha, blue),
             alpha,
         ]
     )
@@ -1689,16 +1734,24 @@ def _dashed_rayleigh_base_polydata(
         np.array([xmax, ymax, zmin]),
         np.array([xmin, ymax, zmin]),
     )
+    dash_length, gap_length = _shared_line_pattern_lengths(
+        list(zip(corners, corners[1:] + corners[:1], strict=True)),
+        dash_fraction,
+        gap_fraction,
+    )
     segments = []
     for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
         edge_length = float(np.linalg.norm(end - start))
-        dash_length = max(edge_length * dash_fraction, edge_length / 80.0)
-        gap_length = max(edge_length * gap_fraction, edge_length / 120.0)
         distance = 0.0
         direction = (end - start) / edge_length
         while distance < edge_length:
             dash_end = min(distance + dash_length, edge_length)
-            segments.append(pv.Line(start + direction * distance, start + direction * dash_end))
+            segments.append(
+                pv.Line(
+                    start + direction * distance,
+                    start + direction * dash_end,
+                )
+            )
             distance = dash_end + gap_length
     return _merge_line_segments(segments)
 
@@ -1730,16 +1783,24 @@ def _dashed_face_polydata(
     else:
         raise ValueError("axis must be 'x' or 'y'")
 
+    dash_length, gap_length = _shared_line_pattern_lengths(
+        list(zip(corners, corners[1:] + corners[:1], strict=True)),
+        dash_fraction,
+        gap_fraction,
+    )
     segments = []
     for start, end in zip(corners, corners[1:] + corners[:1], strict=True):
         edge_length = float(np.linalg.norm(end - start))
-        dash_length = max(edge_length * dash_fraction, edge_length / 80.0)
-        gap_length = max(edge_length * gap_fraction, edge_length / 120.0)
         distance = 0.0
         direction = (end - start) / edge_length
         while distance < edge_length:
             dash_end = min(distance + dash_length, edge_length)
-            segments.append(pv.Line(start + direction * distance, start + direction * dash_end))
+            segments.append(
+                pv.Line(
+                    start + direction * distance,
+                    start + direction * dash_end,
+                )
+            )
             distance = dash_end + gap_length
     return _merge_line_segments(segments)
 
@@ -1749,11 +1810,13 @@ def _dashed_box_polydata(
     dash_fraction: float = 0.06,
     gap_fraction: float = 0.04,
 ) -> pv.PolyData:
+    edges = _box_edges(bounds)
+    dash_length, gap_length = _shared_line_pattern_lengths(
+        edges, dash_fraction, gap_fraction
+    )
     segments = []
-    for start, end in _box_edges(bounds):
+    for start, end in edges:
         edge_length = float(np.linalg.norm(end - start))
-        dash_length = max(edge_length * dash_fraction, edge_length / 80.0)
-        gap_length = max(edge_length * gap_fraction, edge_length / 120.0)
         distance = 0.0
         direction = (end - start) / edge_length
         while distance < edge_length:
@@ -1766,11 +1829,22 @@ def _dashed_box_polydata(
     return _merge_line_segments(segments)
 
 
+def _shared_line_pattern_lengths(
+    edges: list[tuple[np.ndarray, np.ndarray]],
+    dash_fraction: float,
+    gap_fraction: float,
+) -> tuple[float, float]:
+    """Calculate one physical dash pattern shared by every outline edge."""
+    edge_lengths = [float(np.linalg.norm(end - start)) for start, end in edges]
+    reference_length = min(length for length in edge_lengths if length > 0.0)
+    return (
+        max(reference_length * dash_fraction, reference_length / 80.0),
+        max(reference_length * gap_fraction, reference_length / 120.0),
+    )
+
+
 def _merge_line_segments(segments: list[pv.PolyData]) -> pv.PolyData:
-    merged = segments[0]
-    for segment in segments[1:]:
-        merged = merged.merge(segment)
-    return merged
+    return pv.merge(segments)
 
 
 def _box_edges(bounds: tuple[float, float, float, float, float, float]) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -2227,6 +2301,12 @@ def _validate_sponge_visualization(
         raise ValueError(f"{name}_opacity must be between 0 and 1")
 
 
+def _validate_boundary_color(color: str, name: str) -> None:
+    available_colors = {value for _, value in BOUNDARY_COLOR_PRESETS}
+    if color not in available_colors:
+        raise ValueError(f"{name} must be one of: {', '.join(sorted(available_colors))}")
+
+
 def _ensure_positive(value: float | int, name: str) -> None:
     if value <= 0:
         raise ValueError(f"{name} must be positive")
@@ -2247,6 +2327,7 @@ def _optional_int(value: Any) -> int | None:
 
 __all__ = [
     "AMRLevelConfig",
+    "BOUNDARY_COLOR_PRESETS",
     "ClusterConfig",
     "DomainConfig",
     "FarmStudyConfig",

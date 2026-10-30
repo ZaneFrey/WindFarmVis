@@ -21,6 +21,7 @@ from pyvistaqt import BackgroundPlotter
 
 from farmvis_tool import (
     AMRLevelConfig,
+    BOUNDARY_COLOR_PRESETS,
     ClusterConfig,
     DomainConfig,
     FarmStudyConfig,
@@ -360,6 +361,14 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         return widget
 
     @staticmethod
+    def _boundary_color_combo(default: str) -> QtWidgets.QComboBox:
+        widget = QtWidgets.QComboBox()
+        for label, color in BOUNDARY_COLOR_PRESETS:
+            widget.addItem(label, color)
+        widget.setCurrentIndex(max(0, widget.findData(default)))
+        return widget
+
+    @staticmethod
     def _form_row(*widgets: tuple[str, QtWidgets.QWidget]) -> QtWidgets.QWidget:
         row = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(row)
@@ -514,6 +523,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.inflow_sponge_representation = QtWidgets.QComboBox()
         self.inflow_sponge_representation.addItem("Uniform", "uniform")
         self.inflow_sponge_representation.addItem("Dashed", "dashed")
+        self.inflow_sponge_color = self._boundary_color_combo("lightskyblue")
         self.inflow_sponge_opacity = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.inflow_sponge_opacity.setRange(0, 100)
         self.inflow_sponge_opacity.setValue(15)
@@ -525,6 +535,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.inflow_sponge_representation_row = self._form_row(
             ("3D representation", self.inflow_sponge_representation)
         )
+        self.inflow_sponge_color_row = self._form_row(
+            ("Color", self.inflow_sponge_color)
+        )
         self.inflow_sponge_opacity_row = self._form_row(
             ("Opacity", self.inflow_sponge_opacity),
             ("", self.inflow_sponge_opacity_value),
@@ -532,6 +545,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         inflow_layout.addWidget(self.inflow_sponge_enabled)
         inflow_layout.addWidget(self.inflow_sponge_parameter_row)
         inflow_layout.addWidget(self.inflow_sponge_representation_row)
+        inflow_layout.addWidget(self.inflow_sponge_color_row)
         inflow_layout.addWidget(self.inflow_sponge_opacity_row)
         layout.addWidget(inflow_group)
 
@@ -540,10 +554,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             self.outflow_sponge_enabled,
             self.outflow_sponge_thickness,
             self.outflow_sponge_representation,
+            self.outflow_sponge_color,
             self.outflow_sponge_opacity,
             self.outflow_sponge_opacity_value,
             self.outflow_sponge_parameter_row,
             self.outflow_sponge_representation_row,
+            self.outflow_sponge_color_row,
             self.outflow_sponge_opacity_row,
         ) = self._sponge_boundary_group(
             "Outflow boundary",
@@ -556,10 +572,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             self.spanwise_sponge_enabled,
             self.spanwise_sponge_thickness,
             self.spanwise_sponge_representation,
+            self.spanwise_sponge_color,
             self.spanwise_sponge_opacity,
             self.spanwise_sponge_opacity_value,
             self.spanwise_sponge_parameter_row,
             self.spanwise_sponge_representation_row,
+            self.spanwise_sponge_color_row,
             self.spanwise_sponge_opacity_row,
         ) = self._sponge_boundary_group(
             "Spanwise boundaries",
@@ -585,6 +603,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.rayleigh_representation.addItem("Uniform", "uniform")
         self.rayleigh_representation.addItem("Functional", "functional")
         self.rayleigh_representation.addItem("Dashed", "dashed")
+        self.rayleigh_color = self._boundary_color_combo("lightgray")
         self.rayleigh_opacity = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.rayleigh_opacity.setRange(0, 100)
         self.rayleigh_opacity.setValue(15)
@@ -602,8 +621,10 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.rayleigh_representation_row = self._form_row(
             ("3D representation", self.rayleigh_representation)
         )
+        self.rayleigh_color_row = self._form_row(("Color", self.rayleigh_color))
         top_layout.addWidget(self.rayleigh_parameter_row)
         top_layout.addWidget(self.rayleigh_representation_row)
+        top_layout.addWidget(self.rayleigh_color_row)
         top_layout.addWidget(self.rayleigh_opacity_row)
         layout.addWidget(top_group)
         self.inflow_enabled.toggled.connect(self._update_boundary_controls)
@@ -649,6 +670,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         representation = QtWidgets.QComboBox()
         representation.addItem("Uniform", "uniform")
         representation.addItem("Dashed", "dashed")
+        color = self._boundary_color_combo("lightskyblue")
         opacity = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         opacity.setRange(0, 100)
         opacity.setValue(15)
@@ -656,6 +678,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         opacity_value = QtWidgets.QLabel("0.15")
         parameter_row = self._form_row(("Sponge thickness (m)", thickness))
         representation_row = self._form_row(("3D representation", representation))
+        color_row = self._form_row(("Color", color))
         opacity_row = self._form_row(
             ("Opacity", opacity),
             ("", opacity_value),
@@ -663,52 +686,72 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         group_layout.addWidget(enabled)
         group_layout.addWidget(parameter_row)
         group_layout.addWidget(representation_row)
+        group_layout.addWidget(color_row)
         group_layout.addWidget(opacity_row)
         return (
             group,
             enabled,
             thickness,
             representation,
+            color,
             opacity,
             opacity_value,
             parameter_row,
             representation_row,
+            color_row,
             opacity_row,
         )
 
     def _update_boundary_controls(self, _value: object | None = None) -> None:
         self.lin.setEnabled(self.inflow_enabled.isChecked())
-        for enabled, thickness, representation, parameter_row, representation_row, opacity_row in (
+        for (
+            enabled,
+            thickness,
+            representation,
+            color,
+            parameter_row,
+            representation_row,
+            color_row,
+            opacity_row,
+        ) in (
             (
                 self.inflow_sponge_enabled,
                 self.inflow_sponge_thickness,
                 self.inflow_sponge_representation,
+                self.inflow_sponge_color,
                 self.inflow_sponge_parameter_row,
                 self.inflow_sponge_representation_row,
+                self.inflow_sponge_color_row,
                 self.inflow_sponge_opacity_row,
             ),
             (
                 self.outflow_sponge_enabled,
                 self.outflow_sponge_thickness,
                 self.outflow_sponge_representation,
+                self.outflow_sponge_color,
                 self.outflow_sponge_parameter_row,
                 self.outflow_sponge_representation_row,
+                self.outflow_sponge_color_row,
                 self.outflow_sponge_opacity_row,
             ),
             (
                 self.spanwise_sponge_enabled,
                 self.spanwise_sponge_thickness,
                 self.spanwise_sponge_representation,
+                self.spanwise_sponge_color,
                 self.spanwise_sponge_parameter_row,
                 self.spanwise_sponge_representation_row,
+                self.spanwise_sponge_color_row,
                 self.spanwise_sponge_opacity_row,
             ),
         ):
             sponge_enabled = enabled.isChecked()
             thickness.setEnabled(sponge_enabled)
             representation.setEnabled(sponge_enabled)
+            color.setEnabled(sponge_enabled)
             parameter_row.setVisible(sponge_enabled)
             representation_row.setVisible(sponge_enabled)
+            color_row.setVisible(sponge_enabled)
             opacity_row.setVisible(
                 sponge_enabled and representation.currentData() == "uniform"
             )
@@ -716,8 +759,10 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.rayleigh_depth.setEnabled(rayleigh_enabled)
         self.rayleigh_dampcoef.setEnabled(rayleigh_enabled)
         self.rayleigh_representation.setEnabled(rayleigh_enabled)
+        self.rayleigh_color.setEnabled(rayleigh_enabled)
         self.rayleigh_parameter_row.setVisible(rayleigh_enabled)
         self.rayleigh_representation_row.setVisible(rayleigh_enabled)
+        self.rayleigh_color_row.setVisible(rayleigh_enabled)
         self.rayleigh_opacity_row.setVisible(
             rayleigh_enabled
             and self.rayleigh_representation.currentData() in {"uniform", "functional"}
@@ -749,7 +794,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.sounding_show_inversion = QtWidgets.QCheckBox(
             "Show capping inversion height in 3D"
         )
+        self.sounding_inversion_color = self._boundary_color_combo("darkorange")
+        self.sounding_inversion_color_row = self._form_row(
+            ("Color", self.sounding_inversion_color)
+        )
         temperature_layout.addWidget(self.sounding_show_inversion)
+        temperature_layout.addWidget(self.sounding_inversion_color_row)
         temperature_note = QtWidgets.QLabel(
             "Below z_i, theta equals the surface value (neutral boundary layer). "
             "Delta theta is applied linearly across Delta z_c; above the inversion, "
@@ -804,12 +854,16 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.sounding_velocity_profile.currentIndexChanged.connect(
             self._update_sounding_controls
         )
+        self.sounding_show_inversion.toggled.connect(self._update_sounding_controls)
         self._update_sounding_controls()
 
     def _update_sounding_controls(self, _index: int | None = None) -> None:
         self.sounding_z0_row.setVisible(
             self.sounding_velocity_profile.currentData() == "log_law"
         )
+        show_inversion = self.sounding_show_inversion.isChecked()
+        self.sounding_inversion_color.setEnabled(show_inversion)
+        self.sounding_inversion_color_row.setVisible(show_inversion)
 
     def _build_amr_controls(self) -> None:
         layout = self._control_tab("AMR")
@@ -1117,18 +1171,22 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             inflow_sponge_thickness=self.inflow_sponge_thickness.value(),
             inflow_sponge_representation=self.inflow_sponge_representation.currentData(),
             inflow_sponge_opacity=self.inflow_sponge_opacity.value() / 100.0,
+            inflow_sponge_color=self.inflow_sponge_color.currentData(),
             rayleigh_enabled=self.rayleigh_enabled.isChecked(), rayleigh_depth=self.rayleigh_depth.value(),
             rayleigh_dampcoef=self.rayleigh_dampcoef.value(),
             rayleigh_representation=self.rayleigh_representation.currentData(),
             rayleigh_opacity=self.rayleigh_opacity.value() / 100.0,
+            rayleigh_color=self.rayleigh_color.currentData(),
             outflow_sponge_enabled=self.outflow_sponge_enabled.isChecked(),
             outflow_sponge_thickness=self.outflow_sponge_thickness.value(),
             outflow_sponge_representation=self.outflow_sponge_representation.currentData(),
             outflow_sponge_opacity=self.outflow_sponge_opacity.value() / 100.0,
+            outflow_sponge_color=self.outflow_sponge_color.currentData(),
             spanwise_sponge_enabled=self.spanwise_sponge_enabled.isChecked(),
             spanwise_sponge_thickness=self.spanwise_sponge_thickness.value(),
             spanwise_sponge_representation=self.spanwise_sponge_representation.currentData(),
             spanwise_sponge_opacity=self.spanwise_sponge_opacity.value() / 100.0,
+            spanwise_sponge_color=self.spanwise_sponge_color.currentData(),
             sounding_zi=self.sounding_zi.value(),
             sounding_inversion_thickness=self.sounding_inversion_thickness.value(),
             sounding_surface_theta=self.sounding_surface_theta.value(),
@@ -1138,6 +1196,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             sounding_velocity_profile=self.sounding_velocity_profile.currentData(),
             sounding_z0=self.sounding_z0.value(),
             sounding_show_inversion=self.sounding_show_inversion.isChecked(),
+            sounding_inversion_color=self.sounding_inversion_color.currentData(),
             max_level=self.max_level.value(),
             amr_levels=[AMRLevelConfig(level_index=index, **self._editor_values(editor)) for index, editor in enumerate(self.amr_editors, start=1)],
         )
@@ -1261,6 +1320,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             body = "".join(f"<tr><td>{html.escape(str(key))}</td><td>{html.escape(str(value))}</td></tr>" for key, value in pairs)
             return f"<h3>{title}</h3><table border='1' cellspacing='0' cellpadding='4'>{body}</table>"
         blocks = [table("Domain and Grid Summary", rows)]
+        color_names = {value: label for label, value in BOUNDARY_COLOR_PRESETS}
         boundary_rows: list[tuple[str, object]] = [
             ("Inflow region", "Enabled" if domain.inflow_enabled else "Disabled"),
             ("Rayleigh region", "Enabled" if domain.rayleigh_enabled else "Disabled"),
@@ -1275,6 +1335,10 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                 [
                     ("Inflow sponge thickness (m)", domain.inflow_sponge_thickness),
                     ("Inflow 3D representation", domain.inflow_sponge_representation.title()),
+                    (
+                        "Inflow sponge color",
+                        color_names.get(domain.inflow_sponge_color, domain.inflow_sponge_color),
+                    ),
                 ]
             )
             if domain.inflow_sponge_representation.strip().lower() != "dashed":
@@ -1289,6 +1353,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                 [
                     ("Outflow sponge thickness (m)", domain.outflow_sponge_thickness),
                     ("Outflow 3D representation", domain.outflow_sponge_representation.title()),
+                    (
+                        "Outflow sponge color",
+                        color_names.get(
+                            domain.outflow_sponge_color, domain.outflow_sponge_color
+                        ),
+                    ),
                 ]
             )
             if domain.outflow_sponge_representation.strip().lower() != "dashed":
@@ -1306,6 +1376,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                         "Spanwise 3D representation",
                         domain.spanwise_sponge_representation.title(),
                     ),
+                    (
+                        "Spanwise sponge color",
+                        color_names.get(
+                            domain.spanwise_sponge_color, domain.spanwise_sponge_color
+                        ),
+                    ),
                 ]
             )
             if domain.spanwise_sponge_representation.strip().lower() != "dashed":
@@ -1318,6 +1394,10 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                     ("Rayleigh depth H (m)", domain.rayleigh_depth),
                     ("Rayleigh dampcoef (s^-1)", domain.rayleigh_dampcoef),
                     ("3D representation", domain.rayleigh_representation.title()),
+                    (
+                        "Rayleigh color",
+                        color_names.get(domain.rayleigh_color, domain.rayleigh_color),
+                    ),
                 ]
             )
             if domain.rayleigh_representation.strip().lower() != "dashed":
@@ -1336,6 +1416,16 @@ class FarmVisWindow(QtWidgets.QMainWindow):
                 "Shown" if domain.sounding_show_inversion else "Hidden",
             ),
         ]
+        if domain.sounding_show_inversion:
+            sounding_rows.append(
+                (
+                    "3D inversion-height color",
+                    color_names.get(
+                        domain.sounding_inversion_color,
+                        domain.sounding_inversion_color,
+                    ),
+                )
+            )
         if domain.sounding_velocity_profile.strip().lower().replace("-", "_") == "log_law":
             sounding_rows.append(("Surface roughness z_0 (m)", domain.sounding_z0))
         blocks.append(table("Sounding", sounding_rows))
@@ -1661,6 +1751,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             max(0, inflow_sponge_representation_index)
         )
         self.inflow_sponge_opacity.setValue(round(100.0 * domain.inflow_sponge_opacity))
+        self.inflow_sponge_color.setCurrentIndex(
+            max(0, self.inflow_sponge_color.findData(domain.inflow_sponge_color))
+        )
         self.rayleigh_enabled.setChecked(domain.rayleigh_enabled); self.rayleigh_depth.setValue(domain.rayleigh_depth)
         self.rayleigh_dampcoef.setValue(domain.rayleigh_dampcoef)
         rayleigh_representation_index = self.rayleigh_representation.findData(
@@ -1668,6 +1761,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         )
         self.rayleigh_representation.setCurrentIndex(max(0, rayleigh_representation_index))
         self.rayleigh_opacity.setValue(round(100.0 * domain.rayleigh_opacity))
+        self.rayleigh_color.setCurrentIndex(
+            max(0, self.rayleigh_color.findData(domain.rayleigh_color))
+        )
         self.outflow_sponge_enabled.setChecked(domain.outflow_sponge_enabled)
         self.outflow_sponge_thickness.setValue(domain.outflow_sponge_thickness)
         outflow_representation_index = self.outflow_sponge_representation.findData(
@@ -1677,6 +1773,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             max(0, outflow_representation_index)
         )
         self.outflow_sponge_opacity.setValue(round(100.0 * domain.outflow_sponge_opacity))
+        self.outflow_sponge_color.setCurrentIndex(
+            max(0, self.outflow_sponge_color.findData(domain.outflow_sponge_color))
+        )
         self.spanwise_sponge_enabled.setChecked(domain.spanwise_sponge_enabled)
         self.spanwise_sponge_thickness.setValue(domain.spanwise_sponge_thickness)
         spanwise_representation_index = self.spanwise_sponge_representation.findData(
@@ -1686,6 +1785,9 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             max(0, spanwise_representation_index)
         )
         self.spanwise_sponge_opacity.setValue(round(100.0 * domain.spanwise_sponge_opacity))
+        self.spanwise_sponge_color.setCurrentIndex(
+            max(0, self.spanwise_sponge_color.findData(domain.spanwise_sponge_color))
+        )
         self._update_boundary_controls()
         self.sounding_zi.setValue(domain.sounding_zi)
         self.sounding_inversion_thickness.setValue(domain.sounding_inversion_thickness)
@@ -1699,6 +1801,14 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.sounding_velocity_profile.setCurrentIndex(max(0, sounding_velocity_index))
         self.sounding_z0.setValue(domain.sounding_z0)
         self.sounding_show_inversion.setChecked(domain.sounding_show_inversion)
+        self.sounding_inversion_color.setCurrentIndex(
+            max(
+                0,
+                self.sounding_inversion_color.findData(
+                    domain.sounding_inversion_color
+                ),
+            )
+        )
         self._update_sounding_controls()
         self.max_level.setValue(domain.max_level if domain.vertical_discretization == "uniform" else 0)
         self.rotor_diameter.setValue(study.rotor_diameter)
