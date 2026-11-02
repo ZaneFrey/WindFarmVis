@@ -520,6 +520,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.inflow_sponge_thickness.setToolTip(
             "Thickness inward from the solved domain's low-x face (erf.xlo_sponge_end)."
         )
+        self.inflow_sponge_height = self._float(
+            self.lz.value(), minimum=0.001, step=50.0
+        )
+        self.inflow_sponge_height.setToolTip(
+            "Vertical extent measured downward from the domain top."
+        )
         self.inflow_sponge_representation = QtWidgets.QComboBox()
         self.inflow_sponge_representation.addItem("Uniform", "uniform")
         self.inflow_sponge_representation.addItem("Dashed", "dashed")
@@ -530,7 +536,8 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.inflow_sponge_opacity.setToolTip("3D sponge-volume opacity from 0 to 1.")
         self.inflow_sponge_opacity_value = QtWidgets.QLabel("0.15")
         self.inflow_sponge_parameter_row = self._form_row(
-            ("Sponge thickness (m)", self.inflow_sponge_thickness)
+            ("Sponge thickness (m)", self.inflow_sponge_thickness),
+            ("Sponge height (m)", self.inflow_sponge_height),
         )
         self.inflow_sponge_representation_row = self._form_row(
             ("3D representation", self.inflow_sponge_representation)
@@ -553,6 +560,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             outflow_group,
             self.outflow_sponge_enabled,
             self.outflow_sponge_thickness,
+            self.outflow_sponge_height,
             self.outflow_sponge_representation,
             self.outflow_sponge_color,
             self.outflow_sponge_opacity,
@@ -564,6 +572,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         ) = self._sponge_boundary_group(
             "Outflow boundary",
             "Thickness inward from the high-x outflow face (erf.xhi_sponge_start).",
+            include_height=True,
         )
         layout.addWidget(outflow_group)
 
@@ -571,6 +580,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             spanwise_group,
             self.spanwise_sponge_enabled,
             self.spanwise_sponge_thickness,
+            self._spanwise_sponge_height,
             self.spanwise_sponge_representation,
             self.spanwise_sponge_color,
             self.spanwise_sponge_opacity,
@@ -661,12 +671,17 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self,
         title: str,
         thickness_tooltip: str,
+        include_height: bool = False,
     ) -> tuple:
         group = QtWidgets.QGroupBox(title)
         group_layout = QtWidgets.QVBoxLayout(group)
         enabled = QtWidgets.QCheckBox("Enable sponge region")
         thickness = self._float(500.0, minimum=0.001, step=50.0)
         thickness.setToolTip(thickness_tooltip)
+        height = None
+        if include_height:
+            height = self._float(self.lz.value(), minimum=0.001, step=50.0)
+            height.setToolTip("Vertical extent measured downward from the domain top.")
         representation = QtWidgets.QComboBox()
         representation.addItem("Uniform", "uniform")
         representation.addItem("Dashed", "dashed")
@@ -676,7 +691,10 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         opacity.setValue(15)
         opacity.setToolTip("3D sponge-volume opacity from 0 to 1.")
         opacity_value = QtWidgets.QLabel("0.15")
-        parameter_row = self._form_row(("Sponge thickness (m)", thickness))
+        parameter_fields = [("Sponge thickness (m)", thickness)]
+        if height is not None:
+            parameter_fields.append(("Sponge height (m)", height))
+        parameter_row = self._form_row(*parameter_fields)
         representation_row = self._form_row(("3D representation", representation))
         color_row = self._form_row(("Color", color))
         opacity_row = self._form_row(
@@ -692,6 +710,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             group,
             enabled,
             thickness,
+            height,
             representation,
             color,
             opacity,
@@ -707,6 +726,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         for (
             enabled,
             thickness,
+            height,
             representation,
             color,
             parameter_row,
@@ -717,6 +737,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             (
                 self.inflow_sponge_enabled,
                 self.inflow_sponge_thickness,
+                self.inflow_sponge_height,
                 self.inflow_sponge_representation,
                 self.inflow_sponge_color,
                 self.inflow_sponge_parameter_row,
@@ -727,6 +748,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             (
                 self.outflow_sponge_enabled,
                 self.outflow_sponge_thickness,
+                self.outflow_sponge_height,
                 self.outflow_sponge_representation,
                 self.outflow_sponge_color,
                 self.outflow_sponge_parameter_row,
@@ -737,6 +759,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             (
                 self.spanwise_sponge_enabled,
                 self.spanwise_sponge_thickness,
+                self._spanwise_sponge_height,
                 self.spanwise_sponge_representation,
                 self.spanwise_sponge_color,
                 self.spanwise_sponge_parameter_row,
@@ -747,6 +770,8 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         ):
             sponge_enabled = enabled.isChecked()
             thickness.setEnabled(sponge_enabled)
+            if height is not None:
+                height.setEnabled(sponge_enabled)
             representation.setEnabled(sponge_enabled)
             color.setEnabled(sponge_enabled)
             parameter_row.setVisible(sponge_enabled)
@@ -1169,6 +1194,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             inflow_enabled=self.inflow_enabled.isChecked(), Lin=self.lin.value(),
             inflow_sponge_enabled=self.inflow_sponge_enabled.isChecked(),
             inflow_sponge_thickness=self.inflow_sponge_thickness.value(),
+            inflow_sponge_height=self.inflow_sponge_height.value(),
             inflow_sponge_representation=self.inflow_sponge_representation.currentData(),
             inflow_sponge_opacity=self.inflow_sponge_opacity.value() / 100.0,
             inflow_sponge_color=self.inflow_sponge_color.currentData(),
@@ -1179,6 +1205,7 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             rayleigh_color=self.rayleigh_color.currentData(),
             outflow_sponge_enabled=self.outflow_sponge_enabled.isChecked(),
             outflow_sponge_thickness=self.outflow_sponge_thickness.value(),
+            outflow_sponge_height=self.outflow_sponge_height.value(),
             outflow_sponge_representation=self.outflow_sponge_representation.currentData(),
             outflow_sponge_opacity=self.outflow_sponge_opacity.value() / 100.0,
             outflow_sponge_color=self.outflow_sponge_color.currentData(),
@@ -1334,6 +1361,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             boundary_rows.extend(
                 [
                     ("Inflow sponge thickness (m)", domain.inflow_sponge_thickness),
+                    (
+                        "Inflow sponge height (m)",
+                        domain.inflow_sponge_height
+                        if domain.inflow_sponge_height is not None
+                        else domain.Lz,
+                    ),
                     ("Inflow 3D representation", domain.inflow_sponge_representation.title()),
                     (
                         "Inflow sponge color",
@@ -1352,6 +1385,12 @@ class FarmVisWindow(QtWidgets.QMainWindow):
             boundary_rows.extend(
                 [
                     ("Outflow sponge thickness (m)", domain.outflow_sponge_thickness),
+                    (
+                        "Outflow sponge height (m)",
+                        domain.outflow_sponge_height
+                        if domain.outflow_sponge_height is not None
+                        else domain.Lz,
+                    ),
                     ("Outflow 3D representation", domain.outflow_sponge_representation.title()),
                     (
                         "Outflow sponge color",
@@ -1744,6 +1783,11 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         self.inflow_enabled.setChecked(domain.inflow_enabled); self.lin.setValue(domain.Lin)
         self.inflow_sponge_enabled.setChecked(domain.inflow_sponge_enabled)
         self.inflow_sponge_thickness.setValue(domain.inflow_sponge_thickness)
+        self.inflow_sponge_height.setValue(
+            domain.inflow_sponge_height
+            if domain.inflow_sponge_height is not None
+            else domain.Lz
+        )
         inflow_sponge_representation_index = self.inflow_sponge_representation.findData(
             domain.inflow_sponge_representation
         )
@@ -1766,6 +1810,11 @@ class FarmVisWindow(QtWidgets.QMainWindow):
         )
         self.outflow_sponge_enabled.setChecked(domain.outflow_sponge_enabled)
         self.outflow_sponge_thickness.setValue(domain.outflow_sponge_thickness)
+        self.outflow_sponge_height.setValue(
+            domain.outflow_sponge_height
+            if domain.outflow_sponge_height is not None
+            else domain.Lz
+        )
         outflow_representation_index = self.outflow_sponge_representation.findData(
             domain.outflow_sponge_representation
         )

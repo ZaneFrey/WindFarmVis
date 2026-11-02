@@ -222,7 +222,7 @@ x_end,visual = x_start,visual + inflow_sponge_thickness
 erf.xlo_sponge_end = inflow_sponge_thickness
 ```
 
-This places the sponge at the upstream edge of the optional inflow region instead of at the main-domain start. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the full sponge volume, including its inward edge, so the layer depth remains visible. The opacity slider is available for the Uniform representation.
+This places the sponge at the upstream edge of the optional inflow region instead of at the main-domain start. **Sponge height** sets its vertical extent downward from the domain top, `z = [L_z - sponge_height, L_z]`; its default is the full domain height. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the full sponge volume, including its inward and lower edges, so both layer dimensions remain visible. The opacity slider is available for the Uniform representation.
 
 ### Outflow sponge region
 
@@ -233,7 +233,7 @@ x_start,visual = L_x - outflow_sponge_thickness
 erf.xhi_sponge_start = L_in + L_x - outflow_sponge_thickness
 ```
 
-The thickness may span the full solved x extent, including the inflow region. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the full sponge volume, including its inward edge, so the layer depth remains visible. The opacity slider is available for the Uniform representation.
+The thickness may span the full solved x extent, including the inflow region. **Sponge height** sets its vertical extent downward from the domain top, `z = [L_z - sponge_height, L_z]`; its default is the full domain height. **Uniform** draws the interior sponge volume as a translucent light-blue solid. **Dashed** outlines the full sponge volume, including its inward and lower edges, so both layer dimensions remain visible. The opacity slider is available for the Uniform representation.
 
 ### Spanwise sponge regions
 

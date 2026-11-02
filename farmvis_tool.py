@@ -58,6 +58,7 @@ class DomainConfig:
     Lin: float = 0.0
     inflow_sponge_enabled: bool = False
     inflow_sponge_thickness: float = 500.0
+    inflow_sponge_height: float | None = None
     inflow_sponge_representation: str = "uniform"
     inflow_sponge_opacity: float = 0.15
     inflow_sponge_color: str = "lightskyblue"
@@ -69,6 +70,7 @@ class DomainConfig:
     rayleigh_color: str = "lightgray"
     outflow_sponge_enabled: bool = False
     outflow_sponge_thickness: float = 500.0
+    outflow_sponge_height: float | None = None
     outflow_sponge_representation: str = "uniform"
     outflow_sponge_opacity: float = 0.15
     outflow_sponge_color: str = "lightskyblue"
@@ -155,6 +157,8 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
 
     solved_x_length = domain_config.Lx + inflow_length
     if domain_config.inflow_sponge_enabled:
+        if domain_config.inflow_sponge_height is not None:
+            _ensure_positive(domain_config.inflow_sponge_height, "inflow_sponge_height")
         _validate_sponge_visualization(
             domain_config.inflow_sponge_thickness,
             domain_config.inflow_sponge_representation,
@@ -168,6 +172,8 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
             raise ValueError("inflow_sponge_thickness cannot exceed the solved x length")
 
     if domain_config.outflow_sponge_enabled:
+        if domain_config.outflow_sponge_height is not None:
+            _ensure_positive(domain_config.outflow_sponge_height, "outflow_sponge_height")
         _validate_sponge_visualization(
             domain_config.outflow_sponge_thickness,
             domain_config.outflow_sponge_representation,
@@ -341,6 +347,23 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
     total_lengths["z"] = effective_height
     total_cells = counts["x"] * counts["y"] * counts["z"]
 
+    inflow_sponge_height = (
+        effective_height
+        if domain_config.inflow_sponge_height is None
+        or math.isclose(domain_config.inflow_sponge_height, requested_height)
+        else domain_config.inflow_sponge_height
+    )
+    outflow_sponge_height = (
+        effective_height
+        if domain_config.outflow_sponge_height is None
+        or math.isclose(domain_config.outflow_sponge_height, requested_height)
+        else domain_config.outflow_sponge_height
+    )
+    if domain_config.inflow_sponge_enabled and inflow_sponge_height > effective_height:
+        raise ValueError("inflow_sponge_height cannot exceed the domain height")
+    if domain_config.outflow_sponge_enabled and outflow_sponge_height > effective_height:
+        raise ValueError("outflow_sponge_height cannot exceed the domain height")
+
     return {
         "grid_mode": grid_mode,
         "domain_bounds": {
@@ -364,7 +387,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 -inflow_length + domain_config.inflow_sponge_thickness,
                 0.0,
                 domain_config.Ly,
-                0.0,
+                effective_height - inflow_sponge_height,
                 effective_height,
             )
             if domain_config.inflow_sponge_enabled
@@ -374,7 +397,7 @@ def compute_grid_metrics(domain_config: DomainConfig) -> dict[str, Any]:
                 domain_config.Lx,
                 0.0,
                 domain_config.Ly,
-                0.0,
+                effective_height - outflow_sponge_height,
                 effective_height,
             )
             if domain_config.outflow_sponge_enabled
@@ -879,6 +902,7 @@ def serialize_configs(
             "Lin": domain_config.Lin,
             "inflow_sponge_enabled": domain_config.inflow_sponge_enabled,
             "inflow_sponge_thickness": domain_config.inflow_sponge_thickness,
+            "inflow_sponge_height": domain_config.inflow_sponge_height,
             "inflow_sponge_representation": domain_config.inflow_sponge_representation,
             "inflow_sponge_opacity": domain_config.inflow_sponge_opacity,
             "inflow_sponge_color": domain_config.inflow_sponge_color,
@@ -890,6 +914,7 @@ def serialize_configs(
             "rayleigh_color": domain_config.rayleigh_color,
             "outflow_sponge_enabled": domain_config.outflow_sponge_enabled,
             "outflow_sponge_thickness": domain_config.outflow_sponge_thickness,
+            "outflow_sponge_height": domain_config.outflow_sponge_height,
             "outflow_sponge_representation": domain_config.outflow_sponge_representation,
             "outflow_sponge_opacity": domain_config.outflow_sponge_opacity,
             "outflow_sponge_color": domain_config.outflow_sponge_color,
@@ -1047,6 +1072,7 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         Lin=float(domain_data.get("Lin", 0.0)),
         inflow_sponge_enabled=bool(domain_data.get("inflow_sponge_enabled", False)),
         inflow_sponge_thickness=float(domain_data.get("inflow_sponge_thickness", 500.0)),
+        inflow_sponge_height=_optional_float(domain_data.get("inflow_sponge_height")),
         inflow_sponge_representation=str(
             domain_data.get("inflow_sponge_representation", "uniform")
         ),
@@ -1060,6 +1086,7 @@ def configs_from_preset(payload: dict[str, Any]) -> tuple[DomainConfig, FarmStud
         rayleigh_color=str(domain_data.get("rayleigh_color", "lightgray")),
         outflow_sponge_enabled=bool(domain_data.get("outflow_sponge_enabled", False)),
         outflow_sponge_thickness=float(domain_data.get("outflow_sponge_thickness", 500.0)),
+        outflow_sponge_height=_optional_float(domain_data.get("outflow_sponge_height")),
         outflow_sponge_representation=str(
             domain_data.get("outflow_sponge_representation", "uniform")
         ),
